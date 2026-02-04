@@ -31,7 +31,7 @@ public class AppMain {
             }
         }
         else if(AccountLive.equals("N")){
-
+        
             Scanner firstName = new Scanner(System.in);
             Scanner lastName = new Scanner(System.in);
             Scanner stuID = new Scanner(System.in);
@@ -67,6 +67,7 @@ public class AppMain {
                     uPassword = true;
                 }
             }
+            newUser createAccount = new newUser(userFirstName, userLastName, studentID, userName, userPassword);
         }
         else {
             System.out.println("Something is wrong. ");
