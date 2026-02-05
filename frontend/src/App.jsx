@@ -1,4 +1,5 @@
 ﻿import { NavLink, Routes, Route, Navigate } from "react-router-dom";
+import Login from "./components/Login";
 
 function NavItem({ to, children }) {
     return (
@@ -70,7 +71,7 @@ function Home() {
     );
 }
 
-function Login() {
+/*function Login() {
     return (
         <div>
             <div>
@@ -116,7 +117,7 @@ function Login() {
             </div>
         </div>
     );
-}
+}*/
 
 function Register() {
     return (
