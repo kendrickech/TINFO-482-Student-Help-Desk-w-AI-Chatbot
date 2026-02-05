@@ -1,5 +1,6 @@
 ﻿import { NavLink, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./components/Login";
+import Register from "./components/Register";
 
 function NavItem({ to, children }) {
     return (
@@ -141,6 +142,11 @@ function Register() {
                     <div style={{ display: "grid", gap: 6 }}>
                         <label>School Email</label>
                         <input type="email" placeholder="you@school.edu"/>
+                    </div>
+
+                    <div style={{ display: "grid", gap: 6 }}>
+                        <label>Username</label>
+                        <input type="text" placeholder="Create a username"/>
                     </div>
 
                     <div style={{ display: "grid", gap: 6 }}>
