@@ -33,7 +33,8 @@ function Layout({ children }) {
             >
                 <strong style={{ marginRight: 8 }}>Help Desk</strong>
                 <NavItem to="/home">Home</NavItem>
-                <NavItem to="/login">Login/Register</NavItem>
+                <NavItem to="/login">Login</NavItem>
+                <NavItem to="/register">Register</NavItem>
                 <NavItem to="/dashboard">Dashboard</NavItem>
                 <NavItem to="/tickets">Tickets</NavItem>
                 <NavItem to="/chat">Chat</NavItem>
@@ -118,7 +119,7 @@ function Home() {
             </div>
         </div>
     );
-}*/
+}
 
 function Register() {
     return (
@@ -159,7 +160,7 @@ function Register() {
             </div>
         </div>
     );
-}
+}*/
 
 function Dashboard() {
     return (

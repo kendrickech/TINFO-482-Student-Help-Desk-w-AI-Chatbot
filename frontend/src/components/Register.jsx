@@ -3,32 +3,31 @@ import { useState } from "react";
 function Register() {
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
-    const [email, setemail] = useState("");
+    const [email, setEmail] = useState("");
+    const [message, setMessage] = useState("");
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         
-            const response = await fetch("http://localhost:5000/api/register", {
+            const response = await fetch("http://localhost:5000/register", {
                 method: "POST",
-                headers: {
-                "Content-Type": "application/json",
-                },
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
                 body: JSON.stringify({ username, password, email }),
             });
             const data = await response.json();
             setMessage(data.message || data.error);
-        };
+    };
 
-        return (
-            <div>
-                <h2>Register</h2>
+    return (
+        <div>
+            <h2>Register</h2>
 
-                <form onSubmit={handleSubmit}>
-
+            <form onSubmit={handleSubmit}>
                 <input
                     type="email"
                     placeholder="School Email"
-                    onChange={(e) => setemail(e.target.value)}
+                    onChange={(e) => setEmail(e.target.value)}
                 />
 
                 <input
@@ -43,13 +42,12 @@ function Register() {
                 />
 
                 <button type="submit">Register</button>
-                </form>
+            </form>
 
-                <p>{message}</p>
-            </div>
+            <p>{message}</p>
+        </div>
 
-        );
+    );
 
-    }
+}
 export default Register;
-
