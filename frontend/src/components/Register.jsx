@@ -16,7 +16,7 @@ function Register() {
                 body: JSON.stringify({ username, password, email }),
             });
             const data = await response.json();
-            setMessage(data.message || data.error);
+            setMessage(data.message || data.error || "Unknown response");
     };
 
     return (
@@ -27,17 +27,20 @@ function Register() {
                 <input
                     type="email"
                     placeholder="School Email"
+                    value={email}
                     onChange={(e) => setEmail(e.target.value)}
                 />
 
                 <input
                     placeholder="Username"
+                    value={username}
                     onChange={(e) => setUsername(e.target.value)}
                 />
 
                 <input
                     type="password"
                     placeholder="Password"
+                    value={password}
                     onChange={(e) => setPassword(e.target.value)}
                 />
 
