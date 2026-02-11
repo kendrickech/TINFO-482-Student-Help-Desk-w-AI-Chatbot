@@ -1,5 +1,6 @@
 ﻿import { NavLink, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./components/Login";
+import Register from "./components/Register";
 
 function NavItem({ to, children }) {
     return (
@@ -32,7 +33,8 @@ function Layout({ children }) {
             >
                 <strong style={{ marginRight: 8 }}>Help Desk</strong>
                 <NavItem to="/home">Home</NavItem>
-                <NavItem to="/login">Login/Register</NavItem>
+                <NavItem to="/login">Login</NavItem>
+                <NavItem to="/register">Register</NavItem>
                 <NavItem to="/dashboard">Dashboard</NavItem>
                 <NavItem to="/tickets">Tickets</NavItem>
                 <NavItem to="/chat">Chat</NavItem>
@@ -117,7 +119,7 @@ function Home() {
             </div>
         </div>
     );
-}*/
+}
 
 function Register() {
     return (
@@ -144,6 +146,11 @@ function Register() {
                     </div>
 
                     <div style={{ display: "grid", gap: 6 }}>
+                        <label>Username</label>
+                        <input type="text" placeholder="Create a username"/>
+                    </div>
+
+                    <div style={{ display: "grid", gap: 6 }}>
                         <label>Password</label>
                         <input type="password" placeholder="Create a password"/>
                     </div>
@@ -153,7 +160,7 @@ function Register() {
             </div>
         </div>
     );
-}
+}*/
 
 function Dashboard() {
     return (
