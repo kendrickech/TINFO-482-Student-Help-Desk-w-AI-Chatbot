@@ -1,10 +1,16 @@
 # app.py
+import os
 from flask import Flask, jsonify
 from flask_cors import CORS
 from auth import auth_bp
+from dotenv import load_dotenv
+from pathlib import Path
+
+env_path = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=env_path, override=True)
 
 app = Flask(__name__)
-app.secret_key = "dev-secret-key"  # fine for school
+app.secret_key = os.getenv("FLASK_SECRET_KEY")  # fine for school
 CORS(app, supports_credentials=True, origins=["http://localhost:3000", "http://localhost:5173"])
 
 app.register_blueprint(auth_bp)
