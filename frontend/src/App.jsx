@@ -1,7 +1,9 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import { NavLink, Routes, Route, Navigate } from "react-router-dom";
+﻿import { useEffect, useMemo, useState, useCallback } from "react";
+import { NavLink, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+
 import Login from "./components/Login";
 import Register from "./components/Register";
+import Admin from "./components/Admin";
 
 function NavItem({ to, children }) {
     return (
@@ -101,11 +103,13 @@ function Dashboard({ user }) {
         <>
             <h1>Dashboard</h1>
             <p>Welcome {user.username}!</p>
+            <p>Role: {user.role}</p>
+            {/*
             {user.role === "admin" ? (
                 <p>You can see admin-level dashboard info.</p>
             ) : (
                 <p>You can see student-level dashboard info.</p>
-            )}
+            )}*/}
         </>
     );
 }
@@ -263,146 +267,11 @@ function Tickets({ user, tickets, onCreateTicket, onDeleteTicket }) {
 }
 
 
-function Admin({ currentUser }) {
-    const [users, setUsers] = useState([]);
-    const [status, setStatus] = useState("");
-
-    const loadUsers = async () => {
-        setStatus("");
-        const res = await fetch("http://localhost:5000/users", {
-            credentials: "include",
-        });
-
-        if (!res.ok) {
-            setStatus("Could not load users");
-            return;
-        }
-
-        const data = await res.json();
-        setUsers(data);
-    };
-
-    useEffect(() => {
-        loadUsers();
-    }, []);
-
-    const updateRole = async (id, role) => {
-        setStatus("");
-
-        const res = await fetch(`http://localhost:5000/users/${id}/role`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ role }),
-        });
-
-        if (!res.ok) {
-            setStatus("Failed to update role.");
-            return;
-        }
-
-        await loadUsers();
-        setStatus("Role updated.");
-    };
-
-    const removeUser = async (id) => {
-        setStatus("");
-
-        const res = await fetch(`http://localhost:5000/users/${id}`, {
-            method: "DELETE",
-            credentials: "include",
-        });
-
-        if (!res.ok) {
-            setStatus("Failed to delete user.");
-            return;
-        }
-
-        await loadUsers();
-        setStatus("User deleted.");
-    };
-
-    return (
-        <>
-            <h1>Admin Panel</h1>
-            <p>Manage users (promote to admin, demote, delete).</p>
-
-            {status && <p>{status}</p>}
-
-            <button onClick={loadUsers} style={{ padding: "6px 10px", marginBottom: 12 }}>
-                Refresh Users
-            </button>
-
-            {users.length === 0 ? (
-                <p style={{ color: "#666" }}>No users found.</p>
-            ) : (
-                <div style={{ display: "grid", gap: 10, maxWidth: 800 }}>
-                    {users.map((u) => (
-                        <div
-                            key={u.id}
-                            style={{
-                                border: "1px solid #ddd",
-                                borderRadius: 10,
-                                padding: 12,
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                gap: 12,
-                            }}
-                        >
-                            <div>
-                                <strong>{u.username}</strong>
-                                <div style={{ fontSize: 12, color: "#666" }}>
-                                    Role: <b>{u.role}</b>
-                                </div>
-                            </div>
-
-                            <div style={{ display: "flex", gap: 8 }}>
-                                {u.username !== currentUser.username && (
-                                    <>
-                                        <button
-                                            onClick={() => updateRole(u.id, "admin")}
-                                            disabled={u.role === "admin"}
-                                            style={{ padding: "6px 10px" }}
-                                        >
-                                            Make Admin
-                                        </button>
-
-                                        <button
-                                            onClick={() => updateRole(u.id, "student")}
-                                            disabled={u.role === "student"}
-                                            style={{ padding: "6px 10px" }}
-                                        >
-                                            Make Student
-                                        </button>
-
-                                        <button
-                                            onClick={() => removeUser(u.id)}
-                                            style={{ padding: "6px 10px" }}
-                                        >
-                                            Delete User
-                                        </button>
-                                    </>
-                                )}
-
-                                {u.username === currentUser.username && (
-                                    <span style={{ fontSize: 12, color: "#666" }}>
-                                        (This is you)
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </>
-    );
-}
-
 function ProtectedRoute({ user, children }) {
     if (!user) return <Navigate to="/login" replace />;
     return children;
 }
+
 
 function AdminRoute({ user, children }) {
     if (!user) return <Navigate to="/login" replace />;
@@ -410,14 +279,79 @@ function AdminRoute({ user, children }) {
     return children;
 }
 
+
 export default function App() {
     const [user, setUser] = useState(null);
+    const [checking, setChecking] = useState(true);
+    const navigate = useNavigate();
+
+
+    const handleLoginSuccess = useCallback(async () => {
+        try {
+            const res = await fetch("http://localhost:5000/me", {
+                credentials: "include",
+            });
+
+            // If not logged in / session missing
+            if (!res.ok) {
+                setUser(null);
+                return null;
+            }
+
+            // Parse JSON safely
+            let data = null;
+            try {
+                data = await res.json();
+            } catch {
+                setUser(null);
+                return null;
+            }
+
+            if (data?.authenticated) {
+                const nextUser = {
+                    username: data.username ?? "user",
+                    role: data.user_role,
+                };
+                setUser(nextUser);
+                return nextUser;
+            }
+
+            setUser(null);
+            return null;
+        } catch {
+            setUser(null);
+            return null;
+        }
+    });
+
+
+    // Check session cookie on load
+    useEffect(() => {
+        (async () => {
+            setChecking(true);
+            await handleLoginSuccess(); // hydrates user if cookie exists
+            setChecking(false);
+        })();
+    }, []);
+
 
     const handleLogout = async () => {
-        setUser(null);
+        try {
+            await fetch("http://localhost:5000/logout", {
+                method: "POST",
+                credentials: "include",
+            });
+        } catch {
+            // ignore
+        } finally {
+            setUser(null);
+            navigate("/login", { replace: true });
+        }
     };
 
+
     const [tickets, setTickets] = useState([]);
+
 
     const createTicket = (ticket) => {
         setTickets((prev) => [
@@ -434,6 +368,8 @@ export default function App() {
         setTickets((prev) => prev.filter((t) => t.id !== ticketId));
     };
 
+    if (checking) return <div style={{ padding: 24 }}>Loading...</div>;
+
     return (
         <Layout user={user} onLogout={handleLogout}>
             <Routes>
@@ -444,7 +380,11 @@ export default function App() {
                 <Route
                     path="/login"
                     element={
-                        user ? <Navigate to="/dashboard" replace /> : <Login onLogin={(u) => setUser(u)} />
+                        user ? (
+                            <Navigate to="/dashboard" replace />
+                        ) : (
+                            <Login onLogin={handleLoginSuccess} />
+                        )
                     }
                 />
 
