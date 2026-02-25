@@ -10,6 +10,7 @@ tickets_bp = Blueprint("tickets", __name__)
 
 VALID_PRIORITY = {"low", "medium", "high"}
 
+
 def iso(dt):
     return dt.isoformat() if isinstance(dt, datetime) else None
 
@@ -33,9 +34,13 @@ def list_tickets():
                   t.priority,
                   t.status,
                   t.created_at AS "createdAt",
-                  u.username AS "createdBy"
+                  creator.username AS "createdBy",
+                  t.assigned_to AS "assignedTo",
+                  assignee.username AS "assignedUsername",
+                  assignee.user_role AS "assignedRole"
                 FROM ticket_table t
-                JOIN user_table u ON u.user_id = t.created_by
+                JOIN user_table creator ON creator.user_id = t.created_by
+                LEFT JOIN user_table assignee ON assignee.user_id = t.assigned_to
                 ORDER BY t.ticket_id ASC
                 """
             )
@@ -49,9 +54,13 @@ def list_tickets():
                   t.priority,
                   t.status,
                   t.created_at AS "createdAt",
-                  u.username AS "createdBy"
+                  creator.username AS "createdBy",
+                  t.assigned_to AS "assignedTo",
+                  assignee.username AS "assignedUsername",
+                  assignee.user_role AS "assignedRole"
                 FROM ticket_table t
-                JOIN user_table u ON u.user_id = t.created_by
+                JOIN user_table creator ON creator.user_id = t.created_by
+                LEFT JOIN user_table assignee ON assignee.user_id = t.assigned_to
                 WHERE t.created_by = %s
                 ORDER BY t.ticket_id ASC
                 """,
@@ -62,15 +71,20 @@ def list_tickets():
 
         tickets = []
         for r in rows:
-            tickets.append({
-                "id": r["id"],
-                "title": r["title"],
-                "description": r["description"],
-                "priority": r["priority"],
-                "status": r["status"],  # optional for UI later
-                "createdBy": r["createdBy"],
-                "createdAt": iso(r.get("createdAt")),
-            })
+            tickets.append(
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "priority": r["priority"],
+                    "status": r["status"],
+                    "createdBy": r["createdBy"],
+                    "createdAt": iso(r.get("createdAt")),
+                    "assignedTo": r.get("assignedTo"),
+                    "assignedUsername": r.get("assignedUsername"),
+                    "assignedRole": r.get("assignedRole"),
+                }
+            )
 
         return jsonify({"tickets": tickets}), 200
 
@@ -120,16 +134,21 @@ def create_ticket():
 
         conn.commit()
 
-        return jsonify({
-            "ticket": {
-                "id": inserted["id"],
-                "title": title,
-                "description": description,
-                "priority": priority,
-                "createdBy": username,
-                "createdAt": iso(inserted.get("createdAt")),
-            }
-        }), 201
+        return (
+            jsonify(
+                {
+                    "ticket": {
+                        "id": inserted["id"],
+                        "title": title,
+                        "description": description,
+                        "priority": priority,
+                        "createdBy": username,
+                        "createdAt": iso(inserted.get("createdAt")),
+                    }
+                }
+            ),
+            201,
+        )
 
     except psycopg2.Error as e:
         conn.rollback()
@@ -137,6 +156,7 @@ def create_ticket():
     finally:
         cur.close()
         conn.close()
+
 
 @tickets_bp.route("/tickets/<int:ticket_id>", methods=["GET"])
 @login_required
@@ -154,9 +174,13 @@ def get_ticket(ticket_id):
               t.priority,
               t.status,
               t.created_at AS "createdAt",
-              u.username AS "createdBy"
+              creator.username AS "createdBy",
+              t.assigned_to AS "assignedTo",
+              assignee.username AS "assignedUsername",
+              assignee.user_role AS "assignedRole"
             FROM ticket_table t
-            JOIN user_table u ON u.user_id = t.created_by
+            JOIN user_table creator ON creator.user_id = t.created_by
+            LEFT JOIN user_table assignee ON assignee.user_id = t.assigned_to
             WHERE t.ticket_id = %s
             """,
             (ticket_id,),
@@ -175,6 +199,9 @@ def get_ticket(ticket_id):
             "status": r["status"],
             "createdBy": r["createdBy"],
             "createdAt": iso(r.get("createdAt")),
+            "assignedTo": r.get("assignedTo"),
+            "assignedUsername": r.get("assignedUsername"),
+            "assignedRole": r.get("assignedRole"),
         }
 
         return jsonify({"ticket": ticket}), 200
@@ -185,6 +212,87 @@ def get_ticket(ticket_id):
     finally:
         cur.close()
         conn.close()
+
+
+@tickets_bp.route("/assignees", methods=["GET"])
+@login_required
+@admin_required
+def list_assignees():
+    """
+    Returns users who can be assigned tickets: technicians + admins.
+    """
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            SELECT user_id AS id, username, user_role AS role
+            FROM user_table
+            WHERE user_role IN ('technician', 'admin')
+            ORDER BY role, username
+            """
+        )
+        return jsonify({"assignees": cur.fetchall()}), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@tickets_bp.route("/tickets/<int:ticket_id>/assign", methods=["PATCH"])
+@login_required
+@admin_required
+def assign_ticket(ticket_id):
+    """
+    Admin-only. Assign or unassign a ticket.
+    Body: { "assignedTo": <int> } to assign, or { "assignedTo": null } to unassign.
+    """
+    data = request.get_json(silent=True) or {}
+    assigned_to = data.get("assignedTo", None)  # int or None
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        # Ensure ticket exists
+        cur.execute("SELECT ticket_id FROM ticket_table WHERE ticket_id = %s", (ticket_id,))
+        if not cur.fetchone():
+            return jsonify({"error": "Ticket not found"}), 404
+
+        # If assigning (not unassigning), validate the assignee exists and is allowed
+        if assigned_to is not None:
+            cur.execute(
+                """
+                SELECT user_id
+                FROM user_table
+                WHERE user_id = %s
+                  AND user_role IN ('technician', 'admin')
+                """,
+                (assigned_to,),
+            )
+            if not cur.fetchone():
+                return jsonify({"error": "Invalid assignee"}), 400
+
+        cur.execute(
+            """
+            UPDATE ticket_table
+            SET assigned_to = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ticket_id = %s
+            """,
+            (assigned_to, ticket_id),
+        )
+
+        conn.commit()
+        return jsonify({"message": "Assignment updated"}), 200
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
 
 @tickets_bp.route("/tickets/<int:ticket_id>/comments", methods=["GET"])
 @login_required
@@ -210,6 +318,7 @@ def list_comments(ticket_id):
     finally:
         cur.close()
         conn.close()
+
 
 @tickets_bp.route("/tickets/<int:ticket_id>/comments", methods=["POST"])
 @login_required
@@ -244,14 +353,19 @@ def add_comment(ticket_id):
 
         conn.commit()
 
-        return jsonify({
-            "comment": {
-                "comment_id": new_comment["comment_id"],
-                "message": new_comment["message"],
-                "created_at": new_comment["created_at"],
-                "username": u["username"] if u else "unknown",
-            }
-        }), 201
+        return (
+            jsonify(
+                {
+                    "comment": {
+                        "comment_id": new_comment["comment_id"],
+                        "message": new_comment["message"],
+                        "created_at": new_comment["created_at"],
+                        "username": u["username"] if u else "unknown",
+                    }
+                }
+            ),
+            201,
+        )
 
     except psycopg2.Error as e:
         conn.rollback()
@@ -259,6 +373,7 @@ def add_comment(ticket_id):
     finally:
         cur.close()
         conn.close()
+
 
 @tickets_bp.route("/tickets/<int:ticket_id>", methods=["DELETE"])
 @login_required

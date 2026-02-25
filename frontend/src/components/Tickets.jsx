@@ -165,6 +165,13 @@ function Tickets({ user, tickets, onCreateTicket, onDeleteTicket }) {
                   {" • "}
                   {t.createdAt ? new Date(t.createdAt).toLocaleString() : "Unknown time"}
                 </p>
+
+                {user.role === "admin" && (
+                  <p style={{ margin: "6px 0 0", fontSize: 12, color: "#666" }}>
+                    Assigned to:{" "}
+                    {t.assignedUsername ? `${t.assignedUsername} (${t.assignedRole})` : "Unassigned"}
+                  </p>
+                )}
               </div>
             ))}
         </div>
