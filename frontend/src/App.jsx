@@ -4,7 +4,8 @@ import { NavLink, Routes, Route, Navigate, useNavigate } from "react-router-dom"
 import Login from "./components/Login";
 import Register from "./components/Register";
 import Admin from "./components/Admin";
-import Tickets from "./components/Tickets"; // ✅ make sure this path matches your file
+import Tickets from "./components/Tickets";
+import TicketDetails from "./components/TicketDetails";
 
 const API_BASE = "http://localhost:5000";
 
@@ -297,6 +298,10 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        <Route path="/tickets/:ticketId" element={<TicketDetails user={user} />} />
+        
+        <Route path="*" element={<Navigate to="/tickets" replace />} />
 
         <Route
           path="/admin"

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 function Tickets({ user, tickets, onCreateTicket, onDeleteTicket }) {
   const [title, setTitle] = useState("");
@@ -128,7 +129,11 @@ function Tickets({ user, tickets, onCreateTicket, onDeleteTicket }) {
                     alignItems: "center",
                   }}
                 >
-                  <strong>{t.title}</strong>
+                  <strong>
+                    <Link to={`/tickets/${t.id}`} style={{ textDecoration: "none" }}>
+                      {t.title}
+                    </Link>
+                  </strong>
 
                   <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                     <span
