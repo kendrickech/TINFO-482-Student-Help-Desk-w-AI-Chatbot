@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import TicketComments from "./TicketComments";
 
-function TicketDetails({ user }) {
+function TicketDetails({ user, onTicketsChanged }) {
   const { ticketId } = useParams();
 
   const [ticket, setTicket] = useState(null);
@@ -78,6 +78,7 @@ function TicketDetails({ user }) {
       if (!res.ok) throw new Error(data.error || "Failed to update assignment");
 
       await loadTicket(); // refresh assignedUsername/Role
+      if (onTicketsChanged) await onTicketsChanged();
     } catch (e) {
       setError(e?.message || "Failed to update assignment");
     }

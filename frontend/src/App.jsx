@@ -299,7 +299,14 @@ export default function App() {
           }
         />
 
-        <Route path="/tickets/:ticketId" element={<TicketDetails user={user} />} />
+        <Route
+          path="/tickets/:ticketId"
+          element={
+            <ProtectedRoute user={user}>
+              <TicketDetails user={user} onTicketsChanged={loadTickets} />
+            </ProtectedRoute>
+          }
+        />
         
         <Route path="*" element={<Navigate to="/tickets" replace />} />
 
