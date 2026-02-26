@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import AdminTicketSearch from "./AdminTicketSearch";
 
 function Tickets({ user, tickets, onCreateTicket, onDeleteTicket }) {
   const [title, setTitle] = useState("");
@@ -104,6 +105,12 @@ function Tickets({ user, tickets, onCreateTicket, onDeleteTicket }) {
       )}
 
       <h3>{user.role === "admin" ? "All Tickets" : "My Tickets"}</h3>
+
+      {user.role === "admin" && (
+        <div style={{ marginTop: 16 }}>
+          <AdminTicketSearch />
+        </div>
+      )}
 
       {visibleTickets.length === 0 ? (
         <p style={{ color: "#666" }}>No tickets yet.</p>

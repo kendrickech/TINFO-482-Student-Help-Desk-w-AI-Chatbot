@@ -393,3 +393,34 @@ def delete_ticket(ticket_id):
     finally:
         cur.close()
         conn.close()
+
+@tickets_bp.route("/tickets/search-tickets", methods=["GET"])
+@login_required
+@admin_required
+def search_tickets():
+    user_id = session.get("user_id")
+
+    conn = get_db_connection()
+    current_user = conn.execute(
+        "SELECT * FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if current_user["role"] != "admin":
+        conn.close()
+        return jsonify({"message": "Unauthorized"}), 403
+
+    search_value = request.args.get("query")
+
+    tickets = conn.execute("""
+        SELECT tickets.*, users.email, users.user_id
+        FROM tickets
+        JOIN users ON tickets.user_id = users.id
+        WHERE users.email = ?
+        OR users.student_number = ?
+        ORDER BY tickets.created_at DESC
+    """, (search_value, search_value)).fetchall()
+
+    conn.close()
+
+    return jsonify([dict(ticket) for ticket in tickets])

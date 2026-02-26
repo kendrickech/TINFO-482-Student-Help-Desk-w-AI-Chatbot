@@ -25,23 +25,4 @@ def health():
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5000, debug=True)
-
-@app.route("/admin/search-tickets", methods=["GET"])
-@jwt_required()
-def search_tickets():
-    search_value = request.args.get("query")
-
-    conn = get_db_connection()
-
-    tickets = conn.execute("""
-        SELECT tickets.*, users.email, users.student_number
-        FROM tickets
-        JOIN users ON tickets.user_id = users.id
-        WHERE users.email = ?
-        OR users.student_number = ?
-        ORDER BY tickets.created_at DESC
-    """, (search_value, search_value)).fetchall()
-
-    conn.close()
-
-    return jsonify([dict(ticket) for ticket in tickets])
+    
