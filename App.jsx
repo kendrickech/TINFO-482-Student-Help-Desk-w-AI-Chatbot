@@ -1,0 +1,339 @@
+﻿import { useEffect, useState, useCallback } from "react";
+import { NavLink, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+
+import Login from "./components/Login";
+import Register from "./components/Register";
+import Admin from "./components/Admin";
+import Tickets from "./components/Tickets";
+import TechQueue from "./components/TechQueue";
+import TicketDetails from "./components/TicketDetails";
+
+const API_BASE = "http://localhost:5000";
+const canManageTickets = (u) => u?.role === "admin" || u?.role === "technician";
+const canDeleteTickets = (u) => u?.role === "admin";
+
+function NavItem({ to, children }) {
+    return (
+        <NavLink
+            to={to}
+            style={({ isActive }) => ({
+                textDecoration: "none",
+                color: "black",
+                padding: "8px 10px",
+                borderRadius: 10,
+                background: isActive ? "lightgray" : "transparent",
+            })}
+        >
+            {children}
+        </NavLink>
+    );
+}
+
+function Layout({ user, onLogout, children }) {
+    return (
+        <div style={{ fontFamily: "Arial" }}>
+            <nav
+                style={{
+                    padding: 16,
+                    borderBottom: "1px solid #ddd",
+                    display: "flex",
+                    gap: 12,
+                    alignItems: "center",
+                }}
+            >
+                <strong style={{ marginRight: 8 }}>Help Desk</strong>
+
+                {!user ? (
+                    <>
+                        <NavItem to="/login">Login</NavItem>
+                        <NavItem to="/register">Register</NavItem>
+                    </>
+                ) : (
+                    <>
+                        <NavItem to="/dashboard">Dashboard</NavItem>
+                        <NavItem to="/tickets">Tickets</NavItem>
+                        {(user.role === "admin" || user.role === "technician") && (
+                            <NavItem to="/queue">My Queue</NavItem>
+                        )}
+                        {user.role === "admin" && <NavItem to="/admin">Admin</NavItem>}
+
+                        <span style={{ marginLeft: "auto" }}>
+                            {user.username} ({user.role})
+                        </span>
+                        <button onClick={onLogout} style={{ padding: "6px 10px" }}>
+                            Log out
+                        </button>
+                    </>
+                )}
+            </nav>
+
+            <main style={{ padding: 24 }}>{children}</main>
+        </div>
+    );
+}
+
+function Home() {
+    return (
+        <div style={{ textAlign: "center", marginTop: 80 }}>
+            <h1>Campus IT Help Desk</h1>
+            <p style={{ color: "#555", marginTop: 10 }}>
+                Submit and manage IT support requests
+            </p>
+
+            <div style={{ marginTop: 30, display: "flex", gap: 12, justifyContent: "center" }}>
+                <NavLink to="/login">Login</NavLink>
+
+                <NavLink
+                    to="/register"
+                    style={{
+                        background: "white",
+                        color: "black",
+                        border: "1px solid #ccc",
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        textDecoration: "none",
+                    }}
+                >
+                    Register
+                </NavLink>
+            </div>
+        </div>
+    );
+}
+
+function Dashboard({ user }) {
+    return (
+        <>
+            <h1>Dashboard</h1>
+            <p>Welcome {user.username}!</p>
+            <p>Role: {user.role}</p>
+        </>
+    );
+}
+
+function ProtectedRoute({ user, children }) {
+    if (!user) return <Navigate to="/login" replace />;
+    return children;
+}
+
+function AdminRoute({ user, children }) {
+    if (!user) return <Navigate to="/login" replace />;
+    if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
+    return children;
+}
+
+export default function App() {
+    const [user, setUser] = useState(null);
+    const [checking, setChecking] = useState(true);
+
+    const [tickets, setTickets] = useState([]);
+    const [ticketsLoading, setTicketsLoading] = useState(false);
+
+    const navigate = useNavigate();
+
+    const fetchMe = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/me`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok || !data?.authenticated) {
+                setUser(null);
+                return null;
+            }
+
+            const nextUser = {
+                id: data.user_id,
+                username: data.username ?? "user",
+                role: data.user_role ?? "student",
+            };
+
+            setUser(nextUser);
+            return nextUser;
+        } catch {
+            setUser(null);
+            return null;
+        }
+    }, []);
+
+    const loadTickets = useCallback(async () => {
+        setTicketsLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/tickets`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                setTickets([]);
+                return;
+            }
+
+            setTickets(Array.isArray(data.tickets) ? data.tickets : []);
+        } finally {
+            setTicketsLoading(false);
+        }
+    }, []);
+
+    const updateTicket = async (ticketId, updates) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(updates),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to update ticket");
+
+        setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)));
+        return data.ticket;
+    };
+
+    const createTicket = async ({ title, description, priority }) => {
+        const res = await fetch(`${API_BASE}/tickets`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ title, description, priority }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to create ticket");
+
+        setTickets((prev) => [...prev, data.ticket]);
+    };
+
+    const deleteTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+            method: "DELETE",
+            credentials: "include",
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to delete ticket");
+
+        setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+    };
+
+    useEffect(() => {
+        (async () => {
+            setChecking(true);
+            const u = await fetchMe();
+            setChecking(false);
+            if (u) await loadTickets();
+        })();
+    }, [fetchMe, loadTickets]);
+
+    useEffect(() => {
+        if (!user) {
+            setTickets([]);
+            return;
+        }
+        loadTickets();
+    }, [user, loadTickets]);
+
+    const handleLoginSuccess = useCallback(async () => {
+        const u = await fetchMe();
+        if (u) {
+            navigate("/dashboard", { replace: true });
+            await loadTickets();
+        }
+        return u;
+    }, [fetchMe, loadTickets, navigate]);
+
+    const handleLogout = async () => {
+        try {
+            await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+        } catch {
+            // ignore
+        } finally {
+            setUser(null);
+            setTickets([]);
+            navigate("/login", { replace: true });
+        }
+    };
+
+    if (checking) return <div style={{ padding: 24 }}>Loading...</div>;
+
+    return (
+        <Layout user={user} onLogout={handleLogout}>
+            <Routes>
+                <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+                <Route path="/home" element={<Home />} />
+
+                <Route
+                    path="/login"
+                    element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLoginSuccess} />}
+                />
+                <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <Register />} />
+
+                <Route
+                    path="/dashboard"
+                    element={
+                        <ProtectedRoute user={user}>
+                            <Dashboard user={user} />
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/tickets"
+                    element={
+                        <ProtectedRoute user={user}>
+                            <div>
+                                {ticketsLoading && <p style={{ color: "#666" }}>Loading tickets...</p>}
+                                <Tickets
+                                    user={user}
+                                    tickets={tickets}
+                                    onCreateTicket={createTicket}
+                                    onDeleteTicket={deleteTicket}
+                                    onUpdateTicket={updateTicket}
+                                    canManage={canManageTickets(user)}
+                                    canDelete={canDeleteTickets(user)}
+                                />
+                            </div>
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/tickets/:ticketId"
+                    element={
+                        <ProtectedRoute user={user}>
+                            <TicketDetails
+                                user={user}
+                                onTicketsChanged={loadTickets}
+                                onUpdateTicket={updateTicket}
+                                canManage={canManageTickets(user)}
+                                canDelete={canDeleteTickets(user)}
+                                onDeleteTicket={deleteTicket}
+                            />
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/queue"
+                    element={
+                        <ProtectedRoute user={user}>
+                            {(user.role === "admin" || user.role === "technician") ? (
+                                <TechQueue user={user} tickets={tickets} onUpdateTicket={updateTicket} />
+                            ) : (
+                                <Navigate to="/tickets" replace />
+                            )}
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/admin"
+                    element={
+                        <AdminRoute user={user}>
+                            <Admin currentUser={user} />
+                        </AdminRoute>
+                    }
+                />
+
+                <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+            </Routes>
+        </Layout>
+    );
+}
