@@ -3,7 +3,7 @@ from functools import wraps
 
 from flask import Blueprint, request, jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
-from backend.db import get_db_connection
+from db import get_db_connection
 import psycopg2
 
 auth_bp = Blueprint("auth", __name__)

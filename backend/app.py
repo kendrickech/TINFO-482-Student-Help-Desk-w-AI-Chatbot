@@ -2,11 +2,11 @@
 import os
 from flask import Flask, jsonify
 from flask_cors import CORS
-from backend.auth import auth_bp
+from auth import auth_bp
 from dotenv import load_dotenv
 from pathlib import Path
-from backend.users_routes import users_bp
-from backend.tickets import tickets_bp
+from users_routes import users_bp
+from tickets import tickets_bp
 
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)

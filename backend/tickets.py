@@ -3,8 +3,8 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 import psycopg2
 
-from backend.db import get_db_connection
-from backend.auth import login_required, admin_required, technician_required
+from db import get_db_connection
+from auth import login_required, admin_required, technician_required
 
 tickets_bp = Blueprint("tickets", __name__)
 
