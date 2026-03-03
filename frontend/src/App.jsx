@@ -1,7 +1,16 @@
-﻿import { useEffect, useMemo, useState } from "react";
-import { NavLink, Routes, Route, Navigate } from "react-router-dom";
+﻿import { useEffect, useState, useCallback } from "react";
+import { NavLink, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+
 import Login from "./components/Login";
 import Register from "./components/Register";
+import Admin from "./components/Admin";
+import Tickets from "./components/Tickets";
+import TechQueue from "./components/TechQueue";
+import TicketDetails from "./components/TicketDetails";
+
+const API_BASE = "http://localhost:5000";
+const canManageTickets = (u) => u?.role === "admin" || u?.role === "technician";
+const canDeleteTickets = (u) => u?.role === "admin";
 
 function NavItem({ to, children }) {
     return (
@@ -34,18 +43,18 @@ function Layout({ user, onLogout, children }) {
             >
                 <strong style={{ marginRight: 8 }}>Help Desk</strong>
 
-                {!user && (
+                {!user ? (
                     <>
                         <NavItem to="/login">Login</NavItem>
                         <NavItem to="/register">Register</NavItem>
                     </>
-                )}
-
-                {user && (
+                ) : (
                     <>
                         <NavItem to="/dashboard">Dashboard</NavItem>
                         <NavItem to="/tickets">Tickets</NavItem>
-
+                        {(user.role === "admin" || user.role === "technician") && (
+                            <NavItem to="/queue">My Queue</NavItem>
+                        )}
                         {user.role === "admin" && <NavItem to="/admin">Admin</NavItem>}
 
                         <span style={{ marginLeft: "auto" }}>
@@ -71,14 +80,7 @@ function Home() {
                 Submit and manage IT support requests
             </p>
 
-            <div
-                style={{
-                    marginTop: 30,
-                    display: "flex",
-                    gap: 12,
-                    justifyContent: "center",
-                }}
-            >
+            <div style={{ marginTop: 30, display: "flex", gap: 12, justifyContent: "center" }}>
                 <NavLink to="/login">Login</NavLink>
 
                 <NavLink
@@ -87,6 +89,9 @@ function Home() {
                         background: "white",
                         color: "black",
                         border: "1px solid #ccc",
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        textDecoration: "none",
                     }}
                 >
                     Register
@@ -101,300 +106,7 @@ function Dashboard({ user }) {
         <>
             <h1>Dashboard</h1>
             <p>Welcome {user.username}!</p>
-            {user.role === "admin" ? (
-                <p>You can see admin-level dashboard info.</p>
-            ) : (
-                <p>You can see student-level dashboard info.</p>
-            )}
-        </>
-    );
-}
-
-function Tickets({ user, tickets, onCreateTicket, onDeleteTicket }) {
-    const [title, setTitle] = useState("");
-    const [description, setDescription] = useState("");
-    const [priority, setPriority] = useState("low");
-    const [message, setMessage] = useState("");
-
-    const visibleTickets = useMemo(() => {
-        if (!user) return [];
-        if (user.role === "admin") return tickets;
-        return tickets.filter((t) => t.createdBy === user.username);
-    }, [tickets, user]);
-
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        setMessage("");
-
-        if (!title.trim() || !description.trim()) {
-            setMessage("Please enter a title and description.");
-            return;
-        }
-
-        onCreateTicket({
-            title: title.trim(),
-            description: description.trim(),
-            priority,
-            createdBy: user.username,
-        });
-
-        setTitle("");
-        setDescription("");
-        setPriority("low");
-        setMessage("Ticket submitted!");
-    };
-
-    return (
-        <>
-            <h1>Tickets</h1>
-
-            {user.role !== "admin" && (
-                <div style={{ maxWidth: 600, marginBottom: 24 }}>
-                    <h3>Submit a Ticket</h3>
-
-                    <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
-                        <div style={{ display: "grid", gap: 6 }}>
-                            <label>Title</label>
-                            <input
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                placeholder="e.g., Wi-Fi not working"
-                                style={{ padding: 10 }}
-                            />
-                        </div>
-
-                        <div style={{ display: "grid", gap: 6 }}>
-                            <label>Description</label>
-                            <textarea
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                                placeholder="Describe the issue and any steps you already tried..."
-                                rows={4}
-                                style={{ padding: 10, resize: "vertical" }}
-                            />
-                        </div>
-
-                        <div style={{ display: "grid", gap: 6 }}>
-                            <label>Priority</label>
-                            <select
-                                value={priority}
-                                onChange={(e) => setPriority(e.target.value)}
-                                style={{ padding: 10 }}
-                            >
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                            </select>
-                        </div>
-
-                        <button type="submit" style={{ padding: "10px 12px" }}>
-                            Submit Ticket
-                        </button>
-
-                        {message && <p>{message}</p>}
-                    </form>
-                </div>
-            )}
-
-            <h3>{user.role === "admin" ? "All Tickets" : "My Tickets"}</h3>
-
-            {visibleTickets.length === 0 ? (
-                <p style={{ color: "#666" }}>No tickets yet.</p>
-            ) : (
-                <div style={{ display: "grid", gap: 10, maxWidth: 800 }}>
-                    {visibleTickets
-                        .slice()
-                        .reverse()
-                        .map((t) => (
-                            <div
-                                key={t.id}
-                                style={{
-                                    border: "1px solid #ddd",
-                                    borderRadius: 10,
-                                    padding: 12,
-                                }}
-                            >
-                                <div
-                                    style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        gap: 12,
-                                        alignItems: "center",
-                                    }}
-                                >
-                                    <strong>{t.title}</strong>
-
-                                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                                        <span
-                                            style={{
-                                                border: "1px solid #ccc",
-                                                padding: "2px 8px",
-                                                borderRadius: 999,
-                                                fontSize: 12,
-                                            }}
-                                        >
-                                            {t.priority.toUpperCase()}
-                                        </span>
-
-                                        {user.role === "admin" && (
-                                            <button
-                                                onClick={() => onDeleteTicket(t.id)}
-                                                style={{ padding: "6px 10px" }}
-                                            >
-                                                Delete
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-
-                                <p style={{ marginTop: 8, marginBottom: 8 }}>{t.description}</p>
-
-                                <p style={{ margin: 0, fontSize: 12, color: "#666" }}>
-                                    Submitted by: {t.createdBy}
-                                    {" • "}
-                                    {new Date(t.createdAt).toLocaleString()}
-                                </p>
-                            </div>
-                        ))}
-                </div>
-            )}
-        </>
-    );
-}
-
-
-function Admin({ currentUser }) {
-    const [users, setUsers] = useState([]);
-    const [status, setStatus] = useState("");
-
-    const loadUsers = async () => {
-        setStatus("");
-        const res = await fetch("http://localhost:5000/users", {
-            credentials: "include",
-        });
-
-        if (!res.ok) {
-            setStatus("Could not load users");
-            return;
-        }
-
-        const data = await res.json();
-        setUsers(data);
-    };
-
-    useEffect(() => {
-        loadUsers();
-    }, []);
-
-    const updateRole = async (id, role) => {
-        setStatus("");
-
-        const res = await fetch(`http://localhost:5000/users/${id}/role`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ role }),
-        });
-
-        if (!res.ok) {
-            setStatus("Failed to update role.");
-            return;
-        }
-
-        await loadUsers();
-        setStatus("Role updated.");
-    };
-
-    const removeUser = async (id) => {
-        setStatus("");
-
-        const res = await fetch(`http://localhost:5000/users/${id}`, {
-            method: "DELETE",
-            credentials: "include",
-        });
-
-        if (!res.ok) {
-            setStatus("Failed to delete user.");
-            return;
-        }
-
-        await loadUsers();
-        setStatus("User deleted.");
-    };
-
-    return (
-        <>
-            <h1>Admin Panel</h1>
-            <p>Manage users (promote to admin, demote, delete).</p>
-
-            {status && <p>{status}</p>}
-
-            <button onClick={loadUsers} style={{ padding: "6px 10px", marginBottom: 12 }}>
-                Refresh Users
-            </button>
-
-            {users.length === 0 ? (
-                <p style={{ color: "#666" }}>No users found.</p>
-            ) : (
-                <div style={{ display: "grid", gap: 10, maxWidth: 800 }}>
-                    {users.map((u) => (
-                        <div
-                            key={u.id}
-                            style={{
-                                border: "1px solid #ddd",
-                                borderRadius: 10,
-                                padding: 12,
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                gap: 12,
-                            }}
-                        >
-                            <div>
-                                <strong>{u.username}</strong>
-                                <div style={{ fontSize: 12, color: "#666" }}>
-                                    Role: <b>{u.role}</b>
-                                </div>
-                            </div>
-
-                            <div style={{ display: "flex", gap: 8 }}>
-                                {u.username !== currentUser.username && (
-                                    <>
-                                        <button
-                                            onClick={() => updateRole(u.id, "admin")}
-                                            disabled={u.role === "admin"}
-                                            style={{ padding: "6px 10px" }}
-                                        >
-                                            Make Admin
-                                        </button>
-
-                                        <button
-                                            onClick={() => updateRole(u.id, "student")}
-                                            disabled={u.role === "student"}
-                                            style={{ padding: "6px 10px" }}
-                                        >
-                                            Make Student
-                                        </button>
-
-                                        <button
-                                            onClick={() => removeUser(u.id)}
-                                            style={{ padding: "6px 10px" }}
-                                        >
-                                            Delete User
-                                        </button>
-                                    </>
-                                )}
-
-                                {u.username === currentUser.username && (
-                                    <span style={{ fontSize: 12, color: "#666" }}>
-                                        (This is you)
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
+            <p>Role: {user.role}</p>
         </>
     );
 }
@@ -412,46 +124,146 @@ function AdminRoute({ user, children }) {
 
 export default function App() {
     const [user, setUser] = useState(null);
-
-    const handleLogout = async () => {
-        setUser(null);
-    };
+    const [checking, setChecking] = useState(true);
 
     const [tickets, setTickets] = useState([]);
+    const [ticketsLoading, setTicketsLoading] = useState(false);
 
-    const createTicket = (ticket) => {
-        setTickets((prev) => [
-            ...prev,
-            {
-                ...ticket,
-                id: crypto.randomUUID(),
-                createdAt: Date.now(),
-            },
-        ]);
+    const navigate = useNavigate();
+
+    const fetchMe = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/me`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok || !data?.authenticated) {
+                setUser(null);
+                return null;
+            }
+
+            const nextUser = {
+                id: data.user_id,
+                username: data.username ?? "user",
+                role: data.user_role ?? "student",
+            };
+
+            setUser(nextUser);
+            return nextUser;
+        } catch {
+            setUser(null);
+            return null;
+        }
+    }, []);
+
+    const loadTickets = useCallback(async () => {
+        setTicketsLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/tickets`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                setTickets([]);
+                return;
+            }
+
+            setTickets(Array.isArray(data.tickets) ? data.tickets : []);
+        } finally {
+            setTicketsLoading(false);
+        }
+    }, []);
+
+    const updateTicket = async (ticketId, updates) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(updates),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to update ticket");
+
+        setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)));
+        return data.ticket;
     };
 
-    const deleteTicket = (ticketId) => {
+    const createTicket = async ({ title, description, priority }) => {
+        const res = await fetch(`${API_BASE}/tickets`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ title, description, priority }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to create ticket");
+
+        setTickets((prev) => [...prev, data.ticket]);
+    };
+
+    const deleteTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+            method: "DELETE",
+            credentials: "include",
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to delete ticket");
+
         setTickets((prev) => prev.filter((t) => t.id !== ticketId));
     };
+
+    useEffect(() => {
+        (async () => {
+            setChecking(true);
+            const u = await fetchMe();
+            setChecking(false);
+            if (u) await loadTickets();
+        })();
+    }, [fetchMe, loadTickets]);
+
+    useEffect(() => {
+        if (!user) {
+            setTickets([]);
+            return;
+        }
+        loadTickets();
+    }, [user, loadTickets]);
+
+    const handleLoginSuccess = useCallback(async () => {
+        const u = await fetchMe();
+        if (u) {
+            navigate("/dashboard", { replace: true });
+            await loadTickets();
+        }
+        return u;
+    }, [fetchMe, loadTickets, navigate]);
+
+    const handleLogout = async () => {
+        try {
+            await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+        } catch {
+            // ignore
+        } finally {
+            setUser(null);
+            setTickets([]);
+            navigate("/login", { replace: true });
+        }
+    };
+
+    if (checking) return <div style={{ padding: 24 }}>Loading...</div>;
 
     return (
         <Layout user={user} onLogout={handleLogout}>
             <Routes>
                 <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
-
                 <Route path="/home" element={<Home />} />
 
                 <Route
                     path="/login"
-                    element={
-                        user ? <Navigate to="/dashboard" replace /> : <Login onLogin={(u) => setUser(u)} />
-                    }
+                    element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLoginSuccess} />}
                 />
-
-                <Route
-                    path="/register"
-                    element={user ? <Navigate to="/dashboard" replace /> : <Register />}
-                />
+                <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <Register />} />
 
                 <Route
                     path="/dashboard"
@@ -466,12 +278,47 @@ export default function App() {
                     path="/tickets"
                     element={
                         <ProtectedRoute user={user}>
-                            <Tickets
+                            <div>
+                                {ticketsLoading && <p style={{ color: "#666" }}>Loading tickets...</p>}
+                                <Tickets
+                                    user={user}
+                                    tickets={tickets}
+                                    onCreateTicket={createTicket}
+                                    onDeleteTicket={deleteTicket}
+                                    onUpdateTicket={updateTicket}
+                                    canManage={canManageTickets(user)}
+                                    canDelete={canDeleteTickets(user)}
+                                />
+                            </div>
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/tickets/:ticketId"
+                    element={
+                        <ProtectedRoute user={user}>
+                            <TicketDetails
                                 user={user}
-                                tickets={tickets}
-                                onCreateTicket={createTicket}
+                                onTicketsChanged={loadTickets}
+                                onUpdateTicket={updateTicket}
+                                canManage={canManageTickets(user)}
+                                canDelete={canDeleteTickets(user)}
                                 onDeleteTicket={deleteTicket}
                             />
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/queue"
+                    element={
+                        <ProtectedRoute user={user}>
+                            {(user.role === "admin" || user.role === "technician") ? (
+                                <TechQueue user={user} tickets={tickets} onUpdateTicket={updateTicket} />
+                            ) : (
+                                <Navigate to="/tickets" replace />
+                            )}
                         </ProtectedRoute>
                     }
                 />

@@ -19,7 +19,8 @@ def get_db_connection():
             host=os.getenv("DB_HOST"),
             port=os.getenv("DB_PORT"),
             dbname=os.getenv("DB_NAME"),
-            sslmode="require"  # required for Supabase/Neon
+            sslmode="require",  # required for Supabase/Neon
+            cursor_factory=RealDictCursor
         )
         return connection
     except Exception as e:

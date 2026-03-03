@@ -3,7 +3,7 @@ from functools import wraps
 
 from flask import Blueprint, request, jsonify, session
 from werkzeug.security import check_password_hash, generate_password_hash
-from db import get_db_connection
+from backend.db import get_db_connection
 import psycopg2
 
 auth_bp = Blueprint("auth", __name__)
@@ -25,7 +25,20 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def technician_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        role = session.get("user_role")
+        if role not in ("admin", "technician"):
+            return jsonify({"error": "Forbidden"}), 403
+        return f(*args, **kwargs)
+    return wrapper
 
+def col(row, name, index):
+    """Read column from either RealDictCursor (dict) or default cursor (tuple)."""
+    if row is None:
+        return None
+    return row[name] if isinstance(row, dict) else row[index]
 
 # --------- auth routes ---------
 @auth_bp.route("/register", methods=["POST"])
@@ -68,7 +81,9 @@ def register():
             """,
             (username, email, password_hash, user_role),
         )
-        user_id, role = cur.fetchone()
+        row = cur.fetchone()
+        user_id = col(row, "user_id", 0)
+        role = col(row, "user_role", 1)
         conn.commit()
 
         # Optional: log them in immediately
@@ -108,7 +123,9 @@ def login():
     if not user:
         return jsonify({"error": "Invalid username or password"}), 401
     
-    user_id, stored, role = user
+    user_id = col(user, "user_id", 0)
+    stored = col(user, "password_hash", 1)
+    role = col(user, "user_role", 2)
 
     # Backward compatible:
     # - if stored looks like a werkzeug hash, verify hash
@@ -134,13 +151,40 @@ def logout():
 
 @auth_bp.route("/me", methods=["GET"])
 def me():
-    if not session.get("user_id"):
+    user_id = session.get("user_id")
+    if not user_id:
         return jsonify({"authenticated": False}), 200
-    return jsonify({
-        "authenticated": True,
-        "user_id": session["user_id"],
-        "user_role": session.get("user_role"),
-    }), 200
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT user_id, username, user_role FROM user_table WHERE user_id = %s",
+            (user_id,)
+        )
+        row = cur.fetchone()
+
+        if not row:
+            # Session exists but user no longer exists in DB
+            session.clear()
+            return jsonify({"authenticated": False}), 200
+
+        uid = col(row, "user_id", 0)
+        username = col(row, "username", 1)
+        role = col(row, "user_role", 2)
+
+        # Keep session in sync (optional but helpful)
+        session["user_role"] = role
+
+        return jsonify({
+            "authenticated": True,
+            "user_id": uid,
+            "username": username,
+            "user_role": role,
+        }), 200
+    finally:
+        cur.close()
+        conn.close()
 
 
 
