@@ -1,5 +1,6 @@
 ﻿import { useEffect, useState, useCallback } from "react";
 import { NavLink, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 
 import Login from "./components/Login";
 import Register from "./components/Register";
@@ -129,6 +130,9 @@ export default function App() {
     const [tickets, setTickets] = useState([]);
     const [ticketsLoading, setTicketsLoading] = useState(false);
 
+    const [archivedTickets, setArchivedTickets] = useState([]);
+    const [ticketsView, setTicketsView] = useState("active"); // "active" | "archived"
+
     const navigate = useNavigate();
 
     const fetchMe = useCallback(async () => {
@@ -167,6 +171,23 @@ export default function App() {
             }
 
             setTickets(Array.isArray(data.tickets) ? data.tickets : []);
+        } finally {
+            setTicketsLoading(false);
+        }
+    }, []);
+
+    const loadArchivedTickets = useCallback(async () => {
+        setTicketsLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/tickets/archived`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+            setArchivedTickets([]);
+            return;
+            }
+
+            setArchivedTickets(Array.isArray(data.tickets) ? data.tickets : []);
         } finally {
             setTicketsLoading(false);
         }
@@ -213,6 +234,58 @@ export default function App() {
         setTickets((prev) => prev.filter((t) => t.id !== ticketId));
     };
 
+    const archiveTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/archive`, {
+            method: "PATCH",
+            credentials: "include",
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to archive ticket");
+
+        // Refresh lists so UI stays correct
+        if (ticketsView === "active") {
+            await loadTickets();              // ticket disappears from active list
+        } else {
+            // if somehow archiving while viewing archived list
+            await loadArchivedTickets();
+        }
+
+        return data;
+    };
+
+    const unarchiveTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/unarchive`, {
+            method: "PATCH",
+            credentials: "include",
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to unarchive ticket");
+
+        // Refresh both lists so it moves correctly
+        await loadArchivedTickets();        // ticket disappears from archived list
+        await loadTickets();                // ticket appears in active list
+
+        return data;
+    };
+
+    const location = useLocation();
+
+    useEffect(() => {
+        // whenever you leave the tickets page, snap back to active view
+        if (location.pathname !== "/tickets") {
+            setTicketsView("active");
+        }
+    }, [location.pathname]);
+
+    useEffect(() => {
+        if (location.pathname === "/tickets" && user) {
+            setTicketsView("active");
+            loadTickets();
+        }
+    }, [location.pathname, user, loadTickets]);
+
     useEffect(() => {
         (async () => {
             setChecking(true);
@@ -225,8 +298,12 @@ export default function App() {
     useEffect(() => {
         if (!user) {
             setTickets([]);
+            setArchivedTickets([]);
+            setTicketsView("active");
             return;
         }
+
+        setTicketsView("active");
         loadTickets();
     }, [user, loadTickets]);
 
@@ -250,6 +327,19 @@ export default function App() {
             navigate("/login", { replace: true });
         }
     };
+
+    const handleToggleArchived = useCallback(
+        async (showArchived) => {
+            if (showArchived) {
+            setTicketsView("archived");
+            await loadArchivedTickets();
+            } else {
+            setTicketsView("active");
+            await loadTickets();
+            }
+        },
+        [loadArchivedTickets, loadTickets]
+    );
 
     if (checking) return <div style={{ padding: 24 }}>Loading...</div>;
 
@@ -282,12 +372,15 @@ export default function App() {
                                 {ticketsLoading && <p style={{ color: "#666" }}>Loading tickets...</p>}
                                 <Tickets
                                     user={user}
-                                    tickets={tickets}
+                                    tickets={ticketsView == "archived" ? archivedTickets : tickets}
                                     onCreateTicket={createTicket}
                                     onDeleteTicket={deleteTicket}
                                     onUpdateTicket={updateTicket}
                                     canManage={canManageTickets(user)}
                                     canDelete={canDeleteTickets(user)}
+                                    onToggleArchived={handleToggleArchived}
+                                    onArchiveTicket={archiveTicket}
+                                    onUnarchiveTicket={unarchiveTicket}
                                 />
                             </div>
                         </ProtectedRoute>
@@ -314,7 +407,7 @@ export default function App() {
                     path="/queue"
                     element={
                         <ProtectedRoute user={user}>
-                            {(user.role === "admin" || user.role === "technician") ? (
+                            {user && (user.role === "admin" || user.role === "technician") ? (
                                 <TechQueue user={user} tickets={tickets} onUpdateTicket={updateTicket} />
                             ) : (
                                 <Navigate to="/tickets" replace />

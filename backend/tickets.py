@@ -694,6 +694,7 @@ def update_ticket(ticket_id):
             "assignedTo": r.get("assignedTo"),
             "assignedUsername": r.get("assignedUsername"),
             "assignedRole": r.get("assignedRole"),
+            "archivedAt": iso(r.get("archivedAt")),
         }
 
         return jsonify({"ticket": ticket}), 200

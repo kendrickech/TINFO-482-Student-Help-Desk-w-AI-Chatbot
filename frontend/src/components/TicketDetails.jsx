@@ -12,6 +12,34 @@ function TicketDetails({ user, onTicketsChanged }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const canArchive = user && (user.role == "admin" || user.role == "technician");
+
+  const archiveTicket = async () => {
+    const res = await fetch(`http://localhost:5000/tickets/${ticketId}/archive`, {
+      method: "PATCH",
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || "Failed to archive ticket");
+      return;
+    }
+    await loadTicket();
+  };
+
+  const unarchiveTicket = async () => {
+    const res = await fetch(`http://localhost:5000/tickets/${ticketId}/unarchive`, {
+      method: "PATCH",
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      alert(data.error || "Failed to unarchive ticket");
+      return;
+    }
+    await loadTicket();
+  };
+
   const loadTicket = async () => {
     setLoading(true);
     setError("");
@@ -93,6 +121,22 @@ function TicketDetails({ user, onTicketsChanged }) {
       </div>
 
       {error && <p style={{ color: "crimson" }}>{error}</p>}
+
+      {canArchive && (
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          {!ticket?.archivedAt ? (
+            <button onClick={archiveTicket}>Archive</button>
+          ) : (
+            <button onClick={unarchiveTicket}>Unarchive</button>
+          )}
+        </div>
+      )}
+
+      {ticket?.archivedAt && (
+        <p style={{ marginTop: 8 }}>
+          Archived on: {new Date(ticket.archivedAt).toLocaleString()}
+        </p>
+      )}
 
       {loading ? (
         <p>Loading ticket...</p>

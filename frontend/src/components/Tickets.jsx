@@ -7,6 +7,9 @@ function Tickets({
     onCreateTicket,
     onDeleteTicket,
     onUpdateTicket,
+    onToggleArchived,
+    onArchiveTicket,
+    onUnarchiveTicket,
     canManage = false,
     canDelete = false,
 }) {
@@ -16,6 +19,10 @@ function Tickets({
 
     const [message, setMessage] = useState("");
     const [submitting, setSubmitting] = useState(false);
+
+    // NEW: local toggle state for tech/admin view
+    const [showArchived, setShowArchived] = useState(false);
+    const [loadingArchivedToggle, setLoadingArchivedToggle] = useState(false);
 
     const visibleTickets = useMemo(() => {
         if (!user) return [];
@@ -52,13 +59,45 @@ function Tickets({
         }
     };
 
+    const handleToggleArchived = async () => {
+        const next = !showArchived;
+
+        if (typeof onToggleArchived === "function") {
+            try {
+            setLoadingArchivedToggle(true);
+            await onToggleArchived(next);  // parent fetches the right endpoint
+            setShowArchived(next);         // ✅ only flip after success
+            } finally {
+            setLoadingArchivedToggle(false);
+            }
+            return;
+        }
+
+        // fallback if no parent handler provided
+        setShowArchived(next);
+    };
+
     if (!user) return <p>Please log in to view tickets.</p>;
 
     return (
         <>
-            <h1>Tickets</h1>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                <h1 style={{ margin: 0 }}>Tickets</h1>
 
-            {!canManage && (
+                {/* NEW: only show for admin/tech (canManage) */}
+                {canManage && (
+                <button onClick={handleToggleArchived} disabled={loadingArchivedToggle} style={{ padding: "8px 10px" }}>
+                    {loadingArchivedToggle
+                    ? "Loading..."
+                    : showArchived
+                    ? "Show Active Tickets"
+                    : "Show Archived Tickets"}
+                </button>
+                )}
+            </div>
+
+            {/* Hide submit form when viewing archived tickets (and for canManage you already hide it) */}
+            {!canManage && !showArchived && (
                 <div style={{ maxWidth: 600, marginBottom: 24 }}>
                     <h3>Submit a Ticket</h3>
 
@@ -109,7 +148,9 @@ function Tickets({
                 </div>
             )}
 
-            <h3>{canManage ? "All Tickets" : "My Tickets"}</h3>
+            <h3 style={{ marginTop: 18 }}>
+                {canManage ? (showArchived ? "Archived Tickets" : "All Tickets") : "My Tickets"}
+            </h3>
 
             {visibleTickets.length === 0 ? (
                 <p style={{ color: "#666" }}>No tickets yet.</p>
@@ -118,21 +159,25 @@ function Tickets({
                     {visibleTickets
                         .slice()
                         .reverse()
-                        .map((t) => (
-                            <div
-                                key={t.id}
-                                style={{
-                                    border: "1px solid #ddd",
-                                    borderRadius: 10,
-                                    padding: 12,
-                                }}
-                            >
+                        .map((t) => {
+                            const isArchived = !!t.archivedAt;
+
+                            return (
+                                <div
+                                    key={t.id}
+                                    style={{
+                                        border: "1px solid #ddd",
+                                        borderRadius: 10,
+                                        padding: 12,
+                                        opacity: showArchived && isArchived ? 1 : 1,
+                                    }}
+                                >
                                 <div
                                     style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        gap: 12,
-                                        alignItems: "center",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    gap: 12,
+                                    alignItems: "center",
                                     }}
                                 >
                                     <strong>
@@ -142,22 +187,53 @@ function Tickets({
                                     </strong>
 
                                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                                        <span
-                                            style={{
-                                                border: "1px solid #ccc",
-                                                padding: "2px 8px",
-                                                borderRadius: 999,
-                                                fontSize: 12,
+                                        {isArchived && (
+                                            <span
+                                                style={{
+                                                    border: "1px solid #aaa",
+                                                    padding: "2px 8px",
+                                                    borderRadius: 999,
+                                                    fontSize: 12,
                                             }}
                                         >
-                                            {(t.priority || "low").toUpperCase()}
+                                            ARCHIVED
                                         </span>
+                                    )}
 
-                                        {canDelete && (
-                                            <button onClick={() => onDeleteTicket(t.id)} style={{ padding: "6px 10px" }}>
-                                                Delete
-                                            </button>
-                                        )}
+                                    <span
+                                        style={{
+                                            border: "1px solid #ccc",
+                                            padding: "2px 8px",
+                                            borderRadius: 999,
+                                            fontSize: 12,
+                                        }}
+                                    >
+                                        {(t.priority || "low").toUpperCase()}
+                                    </span>
+
+                                    {canManage && !isArchived && !showArchived && typeof onArchiveTicket === "function" && (
+                                        <button
+                                            onClick={() => onArchiveTicket(t.id)}
+                                            style={{ padding: "6px 10px" }}
+                                        >
+                                            Archive
+                                        </button>
+                                    )}
+
+                                    {canManage && isArchived && showArchived && typeof onUnarchiveTicket === "function" && (
+                                        <button
+                                            onClick={() => onUnarchiveTicket(t.id)}
+                                            style={{ padding: "6px 10px" }}
+                                        >
+                                            Unarchive
+                                        </button>
+                                    )}
+
+                                    {canDelete && (
+                                        <button onClick={() => onDeleteTicket(t.id)} style={{ padding: "6px 10px" }}>
+                                            Delete
+                                        </button>
+                                    )}
                                     </div>
                                 </div>
 
@@ -166,33 +242,39 @@ function Tickets({
                                 <p style={{ margin: 0, fontSize: 12, color: "#666" }}>
                                     Submitted by: {t.createdBy} {" • "}
                                     {t.createdAt ? new Date(t.createdAt).toLocaleString() : "Unknown time"}
+                                    {isArchived && t.archivedAt ? (
+                                        <>
+                                            {" • "}Archived: {new Date(t.archivedAt).toLocaleString()}
+                                        </>
+                                    ) : null}
                                 </p>
 
                                 {canManage && (
                                     <p style={{ margin: "6px 0 0", fontSize: 12, color: "#666" }}>
-                                        Assigned to:{" "}
-                                        {t.assignedUsername ? `${t.assignedUsername} (${t.assignedRole})` : "Unassigned"}
+                                        Assigned to: {t.assignedUsername ? `${t.assignedUsername} (${t.assignedRole})` : "Unassigned"}
                                     </p>
                                 )}
 
-                                {canManage && onUpdateTicket && (
+                                {/* Disable status updates while viewing archived list */}
+                                {canManage && onUpdateTicket && !showArchived && !isArchived && (
                                     <div style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center" }}>
-                                        <label style={{ fontSize: 12 }}>
-                                            Status{" "}
-                                            <select
-                                                value={t.status || "open"}
-                                                onChange={(e) => onUpdateTicket(t.id, { status: e.target.value })}
-                                                style={{ marginLeft: 6, padding: 6 }}
-                                            >
-                                                <option value="open">open</option>
-                                                <option value="in_progress">in_progress</option>
-                                                <option value="resolved">resolved</option>
-                                            </select>
-                                        </label>
+                                    <label style={{ fontSize: 12 }}>
+                                        Status{" "}
+                                        <select
+                                            value={t.status || "open"}
+                                            onChange={(e) => onUpdateTicket(t.id, { status: e.target.value })}
+                                            style={{ marginLeft: 6, padding: 6 }}
+                                        >
+                                            <option value="open">open</option>
+                                            <option value="in_progress">in_progress</option>
+                                            <option value="resolved">resolved</option>
+                                        </select>
+                                    </label>
                                     </div>
                                 )}
-                            </div>
-                        ))}
+                                </div>
+                            );
+                        })}
                 </div>
             )}
         </>
