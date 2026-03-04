@@ -389,9 +389,17 @@ def assign_ticket(ticket_id):
 
     try:
         # Ensure ticket exists
-        cur.execute("SELECT ticket_id FROM ticket_table WHERE ticket_id = %s", (ticket_id,))
+        cur.execute(
+            """
+            SELECT ticket_id
+            FROM ticket_table
+            WHERE ticket_id = %s
+            AND archived_at IS NULL
+            """,
+            (ticket_id,),
+        )
         if not cur.fetchone():
-            return jsonify({"error": "Ticket not found"}), 404
+            return jsonify({"error": "Ticket not found or is archived"}), 404
 
         # If assigning (not unassigning), validate the assignee exists and is allowed
         if assigned_to is not None:
@@ -469,9 +477,17 @@ def add_comment(ticket_id):
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         # ensure ticket exists
-        cur.execute("SELECT ticket_id FROM ticket_table WHERE ticket_id = %s", (ticket_id,))
+        cur.execute(
+            """
+            SELECT ticket_id
+            FROM ticket_table
+            WHERE ticket_id = %s
+            AND archived_at IS NULL
+            """,
+            (ticket_id,),
+        )
         if not cur.fetchone():
-            return jsonify({"error": "Ticket not found"}), 404
+            return jsonify({"error": "Ticket not found or is archived"}), 404
 
         cur.execute(
             """
@@ -610,9 +626,17 @@ def update_ticket(ticket_id):
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
         # ensure ticket exists
-        cur.execute("SELECT ticket_id FROM ticket_table WHERE ticket_id = %s", (ticket_id,))
+        cur.execute(
+            """
+            SELECT ticket_id
+            FROM ticket_table
+            WHERE ticket_id = %s
+            AND archived_at IS NULL
+            """,
+            (ticket_id,),
+        )
         if not cur.fetchone():
-            return jsonify({"error": "Ticket not found"}), 404
+            return jsonify({"error": "Ticket not found or is archived"}), 404
 
         # build dynamic SET clause safely
         set_parts = []
@@ -645,6 +669,7 @@ def update_ticket(ticket_id):
               t.created_at AS "createdAt",
               creator.username AS "createdBy",
               t.assigned_to AS "assignedTo",
+              t.archived_at AS "archivedAt",
               assignee.username AS "assignedUsername",
               assignee.user_role AS "assignedRole"
             FROM ticket_table t
