@@ -102,13 +102,8 @@ def list_tickets():
 
 @tickets_bp.route("/tickets/archived", methods=["GET"])
 @login_required
+@technician_required
 def list_archived_tickets():
-    role = session.get("user_role")
-    user_id = session.get("user_id")
-
-    # gate access: only admin + technician
-    if role not in ("admin", "technician"):
-        return jsonify({"error": "Forbidden"}), 403
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -165,10 +160,8 @@ def list_archived_tickets():
 
 @tickets_bp.route("/tickets/<int:ticket_id>/archive", methods=["PATCH"])
 @login_required
+@technician_required
 def archive_ticket(ticket_id):
-    role = session.get("user_role")
-    if role not in ("admin", "technician"):
-        return jsonify({"error": "Forbidden"}), 403
 
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -202,11 +195,9 @@ def archive_ticket(ticket_id):
 
 @tickets_bp.route("/tickets/<int:ticket_id>/unarchive", methods=["PATCH"])
 @login_required
+@technician_required
 def unarchive_ticket(ticket_id):
-    role = session.get("user_role")
-    if role not in ("admin", "technician"):
-        return jsonify({"error": "Forbidden"}), 403
-
+   
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -384,7 +375,7 @@ def list_assignees():
 
 @tickets_bp.route("/tickets/<int:ticket_id>/assign", methods=["PATCH"])
 @login_required
-@technician_required
+@admin_required
 def assign_ticket(ticket_id):
     """
     Admin-only. Assign or unassign a ticket.
