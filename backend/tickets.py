@@ -28,19 +28,21 @@ def list_tickets():
             cur.execute(
                 """
                 SELECT
-                  t.ticket_id AS id,
-                  t.title,
-                  t.description,
-                  t.priority,
-                  t.status,
-                  t.created_at AS "createdAt",
-                  creator.username AS "createdBy",
-                  t.assigned_to AS "assignedTo",
-                  assignee.username AS "assignedUsername",
-                  assignee.user_role AS "assignedRole"
+                    t.ticket_id AS id,
+                    t.title,
+                    t.description,
+                    t.priority,
+                    t.status,
+                    t.created_at AS "createdAt",
+                    t.archived_at AS "archivedAt",
+                    creator.username AS "createdBy",
+                    t.assigned_to AS "assignedTo",
+                    assignee.username AS "assignedUsername",
+                    assignee.user_role AS "assignedRole"
                 FROM ticket_table t
                 JOIN user_table creator ON creator.user_id = t.created_by
                 LEFT JOIN user_table assignee ON assignee.user_id = t.assigned_to
+                WHERE t.archived_at IS NULL
                 ORDER BY t.ticket_id ASC
                 """
             )
@@ -48,20 +50,22 @@ def list_tickets():
             cur.execute(
                 """
                 SELECT
-                  t.ticket_id AS id,
-                  t.title,
-                  t.description,
-                  t.priority,
-                  t.status,
-                  t.created_at AS "createdAt",
-                  creator.username AS "createdBy",
-                  t.assigned_to AS "assignedTo",
-                  assignee.username AS "assignedUsername",
-                  assignee.user_role AS "assignedRole"
+                    t.ticket_id AS id,
+                    t.title,
+                    t.description,
+                    t.priority,
+                    t.status,
+                    t.created_at AS "createdAt",
+                    t.archived_at AS "archivedAt",
+                    creator.username AS "createdBy",
+                    t.assigned_to AS "assignedTo",
+                    assignee.username AS "assignedUsername",
+                    assignee.user_role AS "assignedRole"
                 FROM ticket_table t
                 JOIN user_table creator ON creator.user_id = t.created_by
                 LEFT JOIN user_table assignee ON assignee.user_id = t.assigned_to
                 WHERE t.created_by = %s
+                    AND t.archived_at IS NULL
                 ORDER BY t.ticket_id ASC
                 """,
                 (user_id,),
@@ -83,12 +87,150 @@ def list_tickets():
                     "assignedTo": r.get("assignedTo"),
                     "assignedUsername": r.get("assignedUsername"),
                     "assignedRole": r.get("assignedRole"),
+                    "archivedAt": iso(r.get("archivedAt")),
                 }
             )
 
         return jsonify({"tickets": tickets}), 200
 
     except psycopg2.Error as e:
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@tickets_bp.route("/tickets/archived", methods=["GET"])
+@login_required
+def list_archived_tickets():
+    role = session.get("user_role")
+    user_id = session.get("user_id")
+
+    # gate access: only admin + technician
+    if role not in ("admin", "technician"):
+        return jsonify({"error": "Forbidden"}), 403
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            SELECT
+              t.ticket_id AS id,
+              t.title,
+              t.description,
+              t.priority,
+              t.status,
+              t.created_at AS "createdAt",
+              t.archived_at AS "archivedAt",
+              creator.username AS "createdBy",
+              t.assigned_to AS "assignedTo",
+              assignee.username AS "assignedUsername",
+              assignee.user_role AS "assignedRole"
+            FROM ticket_table t
+            JOIN user_table creator ON creator.user_id = t.created_by
+            LEFT JOIN user_table assignee ON assignee.user_id = t.assigned_to
+            WHERE t.archived_at IS NOT NULL
+            ORDER BY t.archived_at DESC
+            """
+        )
+
+        rows = cur.fetchall()
+        tickets = []
+        for r in rows:
+            tickets.append(
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "priority": r["priority"],
+                    "status": r["status"],
+                    "createdBy": r["createdBy"],
+                    "createdAt": iso(r.get("createdAt")),
+                    "archivedAt": iso(r.get("archivedAt")),
+                    "assignedTo": r.get("assignedTo"),
+                    "assignedUsername": r.get("assignedUsername"),
+                    "assignedRole": r.get("assignedRole"),
+                }
+            )
+
+        return jsonify({"tickets": tickets}), 200
+
+    except psycopg2.Error as e:
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@tickets_bp.route("/tickets/<int:ticket_id>/archive", methods=["PATCH"])
+@login_required
+def archive_ticket(ticket_id):
+    role = session.get("user_role")
+    if role not in ("admin", "technician"):
+        return jsonify({"error": "Forbidden"}), 403
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            UPDATE ticket_table
+            SET archived_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ticket_id = %s
+              AND archived_at IS NULL
+            RETURNING ticket_id AS id, archived_at AS "archivedAt"
+            """,
+            (ticket_id,),
+        )
+        r = cur.fetchone()
+        conn.commit()
+
+        if not r:
+            return jsonify({"error": "Ticket not found or already archived"}), 404
+
+        return jsonify({"message": "Ticket archived", "id": r["id"], "archivedAt": iso(r.get("archivedAt"))}), 200
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@tickets_bp.route("/tickets/<int:ticket_id>/unarchive", methods=["PATCH"])
+@login_required
+def unarchive_ticket(ticket_id):
+    role = session.get("user_role")
+    if role not in ("admin", "technician"):
+        return jsonify({"error": "Forbidden"}), 403
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            UPDATE ticket_table
+            SET archived_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ticket_id = %s
+              AND archived_at IS NOT NULL
+            RETURNING ticket_id AS id
+            """,
+            (ticket_id,),
+        )
+        r = cur.fetchone()
+        conn.commit()
+
+        if not r:
+            return jsonify({"error": "Ticket not found or not archived"}), 404
+
+        return jsonify({"message": "Ticket unarchived", "id": r["id"]}), 200
+
+    except psycopg2.Error as e:
+        conn.rollback()
         return jsonify({"error": "Database error", "details": str(e)}), 500
     finally:
         cur.close()
@@ -176,6 +318,7 @@ def get_ticket(ticket_id):
               t.created_at AS "createdAt",
               creator.username AS "createdBy",
               t.assigned_to AS "assignedTo",
+              t.archived_at AS "archivedAt",
               assignee.username AS "assignedUsername",
               assignee.user_role AS "assignedRole"
             FROM ticket_table t
@@ -202,6 +345,7 @@ def get_ticket(ticket_id):
             "assignedTo": r.get("assignedTo"),
             "assignedUsername": r.get("assignedUsername"),
             "assignedRole": r.get("assignedRole"),
+            "archivedAt": iso(r.get("archivedAt")),
         }
 
         return jsonify({"ticket": ticket}), 200
@@ -393,6 +537,7 @@ def delete_ticket(ticket_id):
     finally:
         cur.close()
         conn.close()
+
 
 @tickets_bp.route("/tickets/<int:ticket_id>", methods=["PATCH"])
 @login_required
