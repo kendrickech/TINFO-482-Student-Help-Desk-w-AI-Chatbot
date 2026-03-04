@@ -412,15 +412,25 @@ def search_tickets():
 
     search_value = request.args.get("query")
 
+    if not search_value or not search_value.strip():
+        return jsonify({"message": "Search query required"}), 400
+
+    conn = get_db_connection()
+
     tickets = conn.execute("""
-        SELECT tickets.*, users.email, users.user_id
+        SELECT tickets.id,
+               tickets.title,
+               tickets.description,
+               tickets.status,
+               users.email,
+               users.student_number
         FROM tickets
         JOIN users ON tickets.user_id = users.id
-        WHERE users.email = ?
-        OR users.student_number = ?
+        WHERE users.email LIKE ?
+           OR CAST(users.student_number AS TEXT) LIKE ?
         ORDER BY tickets.created_at DESC
-    """, (search_value, search_value)).fetchall()
+    """, (f"%{search_value}%", f"%{search_value}%")).fetchall()
 
     conn.close()
 
-    return jsonify([dict(ticket) for ticket in tickets])
+    return jsonify([dict(ticket) for ticket in tickets]), 200

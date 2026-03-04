@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 function AdminTicketSearch() {
   const [searchValue, setSearchValue] = useState("");
@@ -13,11 +14,9 @@ const handleSearch = async () => {
 
   try {
     const response = await fetch(
-      `http://localhost:5000/tickets/search-tickets?query=${searchValue}`,
+      `http://localhost:5000/tickets/search-tickets?query=${encodeURIComponent(searchValue)}`,
       {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
+        credentials: "include", // REQUIRED for session auth
       }
     );
 
@@ -86,21 +85,28 @@ const handleSearch = async () => {
       {message && <p>{message}</p>}
 
       {/* Results */}
-      {tickets.map((ticket) => (
+        {tickets.map((ticket) => (
+          <Link
+            key={ticket.id}
+            to={`/tickets/${ticket.id}`}
+            style={{ textDecoration: "none", color: "inherit" }}
+          >
         <div
           key={ticket.id}
           style={{
-            border: "1px solid #ccc",
-            padding: "10px",
-            marginBottom: "10px",
-          }}
-        >
+          border: "1px solid #ccc",
+          padding: "10px",
+          marginBottom: "10px",
+          cursor: "pointer",
+        }}
+    >
           <p><strong>Title:</strong> {ticket.title}</p>
           <p><strong>Description:</strong> {ticket.description}</p>
           <p><strong>Status:</strong> {ticket.status}</p>
           <p><strong>Email:</strong> {ticket.email}</p>
           <p><strong>Student #:</strong> {ticket.student_number}</p>
         </div>
+        </Link>
       ))}
     </div>
   );
