@@ -1,4 +1,4 @@
-#auth.py
+# auth.py
 from functools import wraps
 
 from flask import Blueprint, request, jsonify, session

@@ -8,6 +8,7 @@ import Admin from "./components/Admin";
 import Tickets from "./components/Tickets";
 import TechQueue from "./components/TechQueue";
 import TicketDetails from "./components/TicketDetails";
+import NotificationBell from "./components/NotificationBell";
 
 const API_BASE = "http://localhost:5000";
 const canManageTickets = (u) => u?.role === "admin" || u?.role === "technician";
@@ -31,46 +32,59 @@ function NavItem({ to, children }) {
 }
 
 function Layout({ user, onLogout, children }) {
-    return (
-        <div style={{ fontFamily: "Arial" }}>
-            <nav
-                style={{
-                    padding: 16,
-                    borderBottom: "1px solid #ddd",
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "center",
-                }}
+  return (
+    <div style={{ fontFamily: "Arial" }}>
+      <nav
+        style={{
+          padding: 16,
+          borderBottom: "1px solid #ddd",
+          display: "flex",
+          gap: 12,
+          alignItems: "center",
+        }}
+      >
+        <strong style={{ marginRight: 8 }}>Help Desk</strong>
+
+        {!user ? (
+          <>
+            <NavItem to="/login">Login</NavItem>
+            <NavItem to="/register">Register</NavItem>
+          </>
+        ) : (
+          <>
+            <NavItem to="/dashboard">Dashboard</NavItem>
+            <NavItem to="/tickets">Tickets</NavItem>
+            {(user.role === "admin" || user.role === "technician") && (
+              <NavItem to="/queue">My Queue</NavItem>
+            )}
+            {user.role === "admin" && <NavItem to="/admin">Admin</NavItem>}
+
+            {/* Right side */}
+            <div
+              style={{
+                marginLeft: "auto",
+                display: "flex",
+                gap: 10,
+                alignItems: "center",
+              }}
             >
-                <strong style={{ marginRight: 8 }}>Help Desk</strong>
+              <span>
+                {user.username} ({user.role})
+              </span>
 
-                {!user ? (
-                    <>
-                        <NavItem to="/login">Login</NavItem>
-                        <NavItem to="/register">Register</NavItem>
-                    </>
-                ) : (
-                    <>
-                        <NavItem to="/dashboard">Dashboard</NavItem>
-                        <NavItem to="/tickets">Tickets</NavItem>
-                        {(user.role === "admin" || user.role === "technician") && (
-                            <NavItem to="/queue">My Queue</NavItem>
-                        )}
-                        {user.role === "admin" && <NavItem to="/admin">Admin</NavItem>}
+              {user && <NotificationBell user={user} />}
 
-                        <span style={{ marginLeft: "auto" }}>
-                            {user.username} ({user.role})
-                        </span>
-                        <button onClick={onLogout} style={{ padding: "6px 10px" }}>
-                            Log out
-                        </button>
-                    </>
-                )}
-            </nav>
+              <button onClick={onLogout} style={{ padding: "6px 10px" }}>
+                Log out
+              </button>
+            </div>
+          </>
+        )}
+      </nav>
 
-            <main style={{ padding: 24 }}>{children}</main>
-        </div>
-    );
+      <main style={{ padding: 24 }}>{children}</main>
+    </div>
+  );
 }
 
 function Home() {
@@ -341,6 +355,42 @@ export default function App() {
         [loadArchivedTickets, loadTickets]
     );
 
+    const assignTicket = async (ticketId, assignedTo) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/assign`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ assignedTo }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to update assignment");
+
+        // refresh list depending on view
+        if (ticketsView === "archived") await loadArchivedTickets();
+        else await loadTickets();
+
+        return data;
+    };
+
+    const claimTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/claim`, {
+            method: "PATCH",
+            credentials: "include",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to claim/unclaim");
+
+        if (ticketsView === "archived") await loadArchivedTickets();
+        else await loadTickets();
+
+        return data;
+    };
+
+    const refreshTickets = useCallback(async () => {
+        if (ticketsView === "archived") await loadArchivedTickets();
+        else await loadTickets();
+    }, [ticketsView, loadArchivedTickets, loadTickets]);
+
     if (checking) return <div style={{ padding: 24 }}>Loading...</div>;
 
     return (
@@ -375,12 +425,14 @@ export default function App() {
                                     tickets={ticketsView == "archived" ? archivedTickets : tickets}
                                     onCreateTicket={createTicket}
                                     onDeleteTicket={deleteTicket}
-                                    onUpdateTicket={updateTicket}
+                                    // onUpdateTicket removed
                                     canManage={canManageTickets(user)}
                                     canDelete={canDeleteTickets(user)}
                                     onToggleArchived={handleToggleArchived}
                                     onArchiveTicket={archiveTicket}
                                     onUnarchiveTicket={unarchiveTicket}
+                                    onAssignTicket={assignTicket}
+                                    onClaimTicket={claimTicket}
                                 />
                             </div>
                         </ProtectedRoute>
@@ -393,7 +445,7 @@ export default function App() {
                         <ProtectedRoute user={user}>
                             <TicketDetails
                                 user={user}
-                                onTicketsChanged={loadTickets}
+                                onTicketsChanged={refreshTickets}
                                 onUpdateTicket={updateTicket}
                                 canManage={canManageTickets(user)}
                                 canDelete={canDeleteTickets(user)}
@@ -426,6 +478,7 @@ export default function App() {
                 />
 
                 <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+
             </Routes>
         </Layout>
     );

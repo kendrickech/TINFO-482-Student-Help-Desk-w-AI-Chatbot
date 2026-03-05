@@ -7,13 +7,33 @@ export default function TechQueue({ user, tickets = [], onUpdateTicket }) {
     const unassigned = [];
     const highPriorityOpen = [];
 
+    // Adjust these status values to match your app.
+    // "active" typically means not closed/resolved/archived.
+    const isActive = (status) => status === "open" || status === "in_progress";
+
     for (const t of tickets) {
       const status = (t.status || "open").toLowerCase();
       const priority = (t.priority || "low").toLowerCase();
 
-      if (t.assignedTo === user?.id) assignedToMe.push(t);
-      if (t.assignedTo == null) unassigned.push(t);
-      if (status === "open" && priority === "high") highPriorityOpen.push(t);
+      // ✅ Only active tickets can appear anywhere in TechQueue
+      if (!isActive(status)) continue;
+
+      const isMine = t.assignedTo != null && user?.id != null && Number(t.assignedTo) === Number(user.id);
+      const isUnassigned = t.assignedTo == null;
+      const isHighOpen = status === "open" && priority === "high";
+
+      // ✅ Only show:
+      // - high + open (even if assigned to someone else)
+      // - OR assigned to me
+      // - OR unassigned
+      // and keep each ticket in only one bucket
+      if (isHighOpen) {
+        highPriorityOpen.push(t);
+      } else if (isMine) {
+        assignedToMe.push(t);
+      } else if (isUnassigned) {
+        unassigned.push(t);
+      }
     }
 
     const byNewest = (a, b) => (b.id ?? 0) - (a.id ?? 0);
@@ -28,7 +48,8 @@ export default function TechQueue({ user, tickets = [], onUpdateTicket }) {
   const Section = ({ title, items }) => (
     <div style={{ border: "1px solid #ddd", borderRadius: 12, padding: 14 }}>
       <h3 style={{ marginTop: 0 }}>
-        {title} <span style={{ color: "#666", fontWeight: "normal" }}>({items.length})</span>
+        {title}{" "}
+        <span style={{ color: "#666", fontWeight: "normal" }}>({items.length})</span>
       </h3>
 
       {items.length === 0 ? (
@@ -50,28 +71,34 @@ export default function TechQueue({ user, tickets = [], onUpdateTicket }) {
 
               <div style={{ color: "#555", marginTop: 6 }}>{t.description}</div>
 
-                  {t.assignedTo == null && onUpdateTicket && user?.id && (
-                      <button
-                          onClick={() => onUpdateTicket(t.id, { assignedTo: user.id })}
-                          style={{ padding: "6px 10px", marginTop: 10 }}
-                      >
-                          Claim
-                      </button>
-                  )}
-                  {t.assignedTo === user?.id && onUpdateTicket && (
-                      <button
-                          onClick={() => onUpdateTicket(t.id, { assignedTo: null })}
-                          style={{ padding: "6px 10px", marginTop: 10 }}
-                      >
-                          Unclaim
-                      </button>
-                  )}
+              {t.assignedTo == null && onUpdateTicket && user?.id && (
+                <button
+                  onClick={() => onUpdateTicket(t.id, { assignedTo: user.id })}
+                  style={{ padding: "6px 10px", marginTop: 10 }}
+                >
+                  Claim
+                </button>
+              )}
+
+              {t.assignedTo === user?.id && onUpdateTicket && (
+                <button
+                  onClick={() => onUpdateTicket(t.id, { assignedTo: null })}
+                  style={{ padding: "6px 10px", marginTop: 10 }}
+                >
+                  Unclaim
+                </button>
+              )}
+
               <div style={{ marginTop: 8, fontSize: 12, color: "#777" }}>
-                Created by: <b>{t.createdBy}</b>{" |"}
+                Created by: <b>{t.createdBy}</b>{" | "}
                 {t.assignedUsername ? (
-                  <> Assigned: <b>{t.assignedUsername}</b></>
+                  <>
+                    Assigned: <b>{t.assignedUsername}</b>
+                  </>
                 ) : (
-                  <> Assigned: <b>Unassigned</b></>
+                  <>
+                    Assigned: <b>Unassigned</b>
+                  </>
                 )}
               </div>
             </div>
@@ -89,9 +116,9 @@ export default function TechQueue({ user, tickets = [], onUpdateTicket }) {
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+        <Section title="High priority open" items={highPriorityOpen} />
         <Section title="Assigned to me" items={assignedToMe} />
         <Section title="Unassigned" items={unassigned} />
-        <Section title="High priority open" items={highPriorityOpen} />
       </div>
     </div>
   );

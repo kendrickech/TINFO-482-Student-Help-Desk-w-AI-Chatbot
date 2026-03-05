@@ -1,3 +1,4 @@
+# tickets.py
 from flask import Blueprint, request, jsonify, session
 from psycopg2.extras import RealDictCursor
 from datetime import datetime
@@ -5,6 +6,7 @@ import psycopg2
 
 from db import get_db_connection
 from auth import login_required, admin_required, technician_required
+from notifications import create_notification
 
 tickets_bp = Blueprint("tickets", __name__)
 
@@ -160,9 +162,8 @@ def list_archived_tickets():
 
 @tickets_bp.route("/tickets/<int:ticket_id>/archive", methods=["PATCH"])
 @login_required
-@technician_required
+@technician_required  # keep this if it includes admin too
 def archive_ticket(ticket_id):
-
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -173,21 +174,18 @@ def archive_ticket(ticket_id):
                 updated_at = CURRENT_TIMESTAMP
             WHERE ticket_id = %s
               AND archived_at IS NULL
-            RETURNING ticket_id AS id, archived_at AS "archivedAt"
+              AND status = 'resolved'
+            RETURNING ticket_id AS id, archived_at
             """,
             (ticket_id,),
         )
-        r = cur.fetchone()
+        row = cur.fetchone()
         conn.commit()
 
-        if not r:
-            return jsonify({"error": "Ticket not found or already archived"}), 404
+        if not row:
+            return jsonify({"error": "Only resolved, unarchived tickets can be archived"}), 400
 
-        return jsonify({"message": "Ticket archived", "id": r["id"], "archivedAt": iso(r.get("archivedAt"))}), 200
-
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({"error": "Database error", "details": str(e)}), 500
+        return jsonify({"ok": True, "ticket": row}), 200
     finally:
         cur.close()
         conn.close()
@@ -195,9 +193,8 @@ def archive_ticket(ticket_id):
 
 @tickets_bp.route("/tickets/<int:ticket_id>/unarchive", methods=["PATCH"])
 @login_required
-@technician_required
+@admin_required
 def unarchive_ticket(ticket_id):
-   
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
     try:
@@ -212,17 +209,13 @@ def unarchive_ticket(ticket_id):
             """,
             (ticket_id,),
         )
-        r = cur.fetchone()
+        row = cur.fetchone()
         conn.commit()
 
-        if not r:
+        if not row:
             return jsonify({"error": "Ticket not found or not archived"}), 404
 
-        return jsonify({"message": "Ticket unarchived", "id": r["id"]}), 200
-
-    except psycopg2.Error as e:
-        conn.rollback()
-        return jsonify({"error": "Database error", "details": str(e)}), 500
+        return jsonify({"ok": True, "ticket": row}), 200
     finally:
         cur.close()
         conn.close()
@@ -377,10 +370,6 @@ def list_assignees():
 @login_required
 @admin_required
 def assign_ticket(ticket_id):
-    """
-    Admin-only. Assign or unassign a ticket.
-    Body: { "assignedTo": <int> } to assign, or { "assignedTo": null } to unassign.
-    """
     data = request.get_json(silent=True) or {}
     assigned_to = data.get("assignedTo", None)  # int or None
 
@@ -388,18 +377,23 @@ def assign_ticket(ticket_id):
     cur = conn.cursor(cursor_factory=RealDictCursor)
 
     try:
-        # Ensure ticket exists
+        # Fetch ticket context FIRST (also confirms it exists)
         cur.execute(
             """
-            SELECT ticket_id
+            SELECT ticket_id, title, created_by, assigned_to
             FROM ticket_table
             WHERE ticket_id = %s
-            AND archived_at IS NULL
+              AND archived_at IS NULL
             """,
             (ticket_id,),
         )
-        if not cur.fetchone():
+        ticket = cur.fetchone()
+        if not ticket:
             return jsonify({"error": "Ticket not found or is archived"}), 404
+
+        old_assigned_to = ticket["assigned_to"]
+        title = ticket.get("title") or f"Ticket #{ticket_id}"
+        created_by = ticket["created_by"]
 
         # If assigning (not unassigning), validate the assignee exists and is allowed
         if assigned_to is not None:
@@ -415,6 +409,7 @@ def assign_ticket(ticket_id):
             if not cur.fetchone():
                 return jsonify({"error": "Invalid assignee"}), 400
 
+        # Update assignment
         cur.execute(
             """
             UPDATE ticket_table
@@ -424,6 +419,38 @@ def assign_ticket(ticket_id):
             """,
             (assigned_to, ticket_id),
         )
+
+        # Notifications: ONLY new assignee + student
+        if assigned_to != old_assigned_to:
+            link = f"/tickets/{ticket_id}"
+
+            if assigned_to is not None:
+                # notify the new assignee
+                create_notification(
+                    conn,
+                    user_id=assigned_to,
+                    type_="TICKET_ASSIGNED",
+                    message=f"You were assigned: {title}",
+                    link=link,
+                )
+
+                # notify the student
+                create_notification(
+                    conn,
+                    user_id=created_by,
+                    type_="TICKET_ASSIGNED_STUDENT",
+                    message=f"Your ticket ({title}) was assigned to a technician.",
+                    link=link,
+                )
+            else:
+                # unassigned: notify the student only (optional but usually helpful)
+                create_notification(
+                    conn,
+                    user_id=created_by,
+                    type_="TICKET_UNASSIGNED_STUDENT",
+                    message=f"Your ticket ({title}) is currently unassigned.",
+                    link=link,
+                )
 
         conn.commit()
         return jsonify({"message": "Assignment updated"}), 200
@@ -479,14 +506,15 @@ def add_comment(ticket_id):
         # ensure ticket exists
         cur.execute(
             """
-            SELECT ticket_id
+            SELECT ticket_id, title, created_by, assigned_to
             FROM ticket_table
             WHERE ticket_id = %s
             AND archived_at IS NULL
             """,
             (ticket_id,),
         )
-        if not cur.fetchone():
+        ticket = cur.fetchone()
+        if not ticket:
             return jsonify({"error": "Ticket not found or is archived"}), 404
 
         cur.execute(
@@ -498,6 +526,29 @@ def add_comment(ticket_id):
             (message, ticket_id, user_id),
         )
         new_comment = cur.fetchone()
+        link = f"/tickets/{ticket_id}"
+        title = ticket.get("title") or f"Ticket #{ticket_id}"
+
+        # notify student (unless they wrote the comment)
+        if ticket["created_by"] != user_id:
+            create_notification(
+                conn,
+                user_id=ticket["created_by"],
+                type_="NEW_COMMENT",
+                message=f"New comment on your ticket ({title}).",
+                link=link,
+            )
+
+        # notify assignee (unless unassigned or they wrote the comment)
+        assignee_id = ticket.get("assigned_to")
+        if assignee_id and assignee_id != user_id:
+            create_notification(
+                conn,
+                user_id=assignee_id,
+                type_="NEW_COMMENT",
+                message=f"New comment on assigned ticket ({title}).",
+                link=link,
+            )
 
         cur.execute("SELECT username FROM user_table WHERE user_id = %s", (user_id,))
         u = cur.fetchone()
@@ -510,7 +561,7 @@ def add_comment(ticket_id):
                     "comment": {
                         "comment_id": new_comment["comment_id"],
                         "message": new_comment["message"],
-                        "created_at": new_comment["created_at"],
+                        "created_at": iso(new_comment.get("created_at")),
                         "username": u["username"] if u else "unknown",
                     }
                 }
@@ -546,21 +597,175 @@ def delete_ticket(ticket_id):
         conn.close()
 
 
+@tickets_bp.route("/tickets/<int:ticket_id>/claim", methods=["PATCH"])
+@login_required
+@technician_required
+def claim_ticket(ticket_id):
+    """
+    Technician-only:
+    - If unassigned -> claim it (assign to self)
+    - If assigned to self -> unclaim it (set NULL)
+    - Otherwise -> forbidden
+    """
+    user_id = session.get("user_id")
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+
+    try:
+        # Get ticket context
+        cur.execute(
+            """
+            SELECT ticket_id, title, created_by, assigned_to
+            FROM ticket_table
+            WHERE ticket_id = %s
+              AND archived_at IS NULL
+            """,
+            (ticket_id,),
+        )
+        t = cur.fetchone()
+        if not t:
+            return jsonify({"error": "Ticket not found or is archived"}), 404
+
+        link = f"/tickets/{ticket_id}"
+        title = t.get("title") or f"Ticket #{ticket_id}"
+
+        # Case A: unassigned -> claim
+        if t["assigned_to"] is None:
+            cur.execute(
+                """
+                UPDATE ticket_table
+                SET assigned_to = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE ticket_id = %s
+                  AND assigned_to IS NULL
+                RETURNING assigned_to
+                """,
+                (user_id, ticket_id),
+            )
+            updated = cur.fetchone()
+            if not updated:
+                # someone else claimed it between SELECT and UPDATE
+                conn.rollback()
+                return jsonify({"error": "Ticket was claimed by someone else"}), 409
+
+            # Notifications: assignee (self) + student
+            create_notification(conn, user_id, "TICKET_ASSIGNED", f"You claimed: {title}", link)
+            create_notification(conn, t["created_by"], "TICKET_ASSIGNED_STUDENT",
+                                f"Your ticket ({title}) was claimed by a technician.", link)
+
+            conn.commit()
+            return jsonify({"message": "Ticket claimed"}), 200
+
+        # Case B: assigned to self -> unclaim
+        if t["assigned_to"] == user_id:
+            cur.execute(
+                """
+                UPDATE ticket_table
+                SET assigned_to = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE ticket_id = %s
+                  AND assigned_to = %s
+                """,
+                (ticket_id, user_id),
+            )
+
+            # Notify student only (matches your rule)
+            create_notification(conn, t["created_by"], "TICKET_UNASSIGNED_STUDENT",
+                                f"Your ticket ({title}) is currently unassigned.", link)
+
+            conn.commit()
+            return jsonify({"message": "Ticket unclaimed"}), 200
+
+        # Case C: assigned to someone else -> forbidden
+        return jsonify({"error": "You can only unclaim tickets assigned to you."}), 403
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@tickets_bp.route("/tickets/<int:ticket_id>/status", methods=["PATCH"])
+@login_required
+@technician_required
+def update_ticket_status(ticket_id):
+    data = request.get_json(silent=True) or {}
+    status = (data.get("status") or "").strip().lower()
+
+    allowed_status = {"open", "in_progress", "resolved"}
+    if status not in allowed_status:
+        return jsonify({"error": "status must be open, in_progress, or resolved"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        # don’t allow status changes on archived tickets
+        cur.execute(
+            """
+            SELECT ticket_id, title, created_by, status
+            FROM ticket_table
+            WHERE ticket_id = %s
+              AND archived_at IS NULL
+            """,
+            (ticket_id,),
+        )
+        before = cur.fetchone()
+        if not before:
+            return jsonify({"error": "Ticket not found or is archived"}), 404
+
+        cur.execute(
+            """
+            UPDATE ticket_table
+            SET status = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ticket_id = %s
+              AND archived_at IS NULL
+            RETURNING ticket_id AS id, status
+            """,
+            (status, ticket_id),
+        )
+        r = cur.fetchone()
+        if not r:
+            conn.rollback()
+            return jsonify({"error": "Ticket not found after update"}), 404
+
+        # notify student if status changed
+        if before.get("status") != status:
+            link = f"/tickets/{ticket_id}"
+            title = before.get("title") or f"Ticket #{ticket_id}"
+            create_notification(
+                conn,
+                user_id=before["created_by"],
+                type_="STATUS_CHANGED",
+                message=f"Your ticket ({title}) status changed to {status}.",
+                link=link,
+            )
+
+        conn.commit()
+        return jsonify({"ticket": {"id": r["id"], "status": r["status"]}}), 200
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
 @tickets_bp.route("/tickets/<int:ticket_id>", methods=["PATCH"])
 @login_required
 @technician_required
 def update_ticket(ticket_id):
     """
     Technician/admin can update ticket fields.
-    Body can include: title, description, priority, status, assignedTo
+    Body can include: title, description, priority, assignedTo
     """
     data = request.get_json(silent=True) or {}
 
-    allowed_status = {"open", "in_progress", "resolved"}
     title = data.get("title")
     description = data.get("description")
     priority = data.get("priority")
-    status = data.get("status")
     assigned_to = data.get("assignedTo")
 
     updates = {}
@@ -581,12 +786,6 @@ def update_ticket(ticket_id):
         if priority not in VALID_PRIORITY:
             return jsonify({"error": "priority must be low, medium, or high"}), 400
         updates["priority"] = priority
-
-    if status is not None:
-        status = (status or "").strip().lower()
-        if status not in allowed_status:
-            return jsonify({"error": "status must be open, in_progress, or resolved"}), 400
-        updates["status"] = status
 
     # assignedTo: allow null to unassign, int to assign
     if "assignedTo" in data:
@@ -628,14 +827,15 @@ def update_ticket(ticket_id):
         # ensure ticket exists
         cur.execute(
             """
-            SELECT ticket_id
+            SELECT ticket_id, title, created_by, assigned_to, status
             FROM ticket_table
             WHERE ticket_id = %s
             AND archived_at IS NULL
             """,
             (ticket_id,),
         )
-        if not cur.fetchone():
+        before = cur.fetchone()
+        if not before:
             return jsonify({"error": "Ticket not found or is archived"}), 404
 
         # build dynamic SET clause safely
@@ -681,6 +881,40 @@ def update_ticket(ticket_id):
         )
 
         r = cur.fetchone()
+        if not r:
+            conn.rollback()
+            return jsonify({"error": "Ticket not found after update"}), 404
+        
+        link = f"/tickets/{ticket_id}"
+        title = r.get("title") or before.get("title") or f"Ticket #{ticket_id}"
+
+        # assignment changed -> notify new assignee + student
+        if before.get("assigned_to") != r.get("assignedTo"):
+            new_assignee = r.get("assignedTo")
+            if new_assignee is not None:
+                create_notification(
+                    conn,
+                    user_id=new_assignee,
+                    type_="TICKET_ASSIGNED",
+                    message=f"You were assigned: {title}",
+                    link=link,
+                )
+                create_notification(
+                    conn,
+                    user_id=before["created_by"],
+                    type_="TICKET_ASSIGNED_STUDENT",
+                    message=f"Your ticket ({title}) was assigned to a technician.",
+                    link=link,
+                )
+            else:
+                create_notification(
+                    conn,
+                    user_id=before["created_by"],
+                    type_="TICKET_UNASSIGNED_STUDENT",
+                    message=f"Your ticket ({title}) is currently unassigned.",
+                    link=link,
+                )
+
         conn.commit()
 
         ticket = {
