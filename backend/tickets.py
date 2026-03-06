@@ -939,3 +939,69 @@ def update_ticket(ticket_id):
     finally:
         cur.close()
         conn.close()
+
+@tickets_bp.route("/tickets/<int:ticket_id>/priority", methods=["PATCH"])
+@login_required
+@technician_required
+def update_ticket_priority(ticket_id):
+    data = request.get_json(silent=True) or {}
+    priority = (data.get("priority") or "").strip().lower()
+
+    allowed_priority = {"low", "medium", "high"}
+    if priority not in allowed_priority:
+        return jsonify({"error": "priority must be low, medium, or high"}), 400
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        # don’t allow priority changes on archived tickets
+        cur.execute(
+            """
+            SELECT ticket_id, title, created_by, priority
+            FROM ticket_table
+            WHERE ticket_id = %s
+              AND archived_at IS NULL
+            """,
+            (ticket_id,),
+        )
+        before = cur.fetchone()
+        if not before:
+            return jsonify({"error": "Ticket not found or is archived"}), 404
+
+        cur.execute(
+            """
+            UPDATE ticket_table
+            SET priority = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ticket_id = %s
+              AND archived_at IS NULL
+            RETURNING ticket_id AS id, priority
+            """,
+            (priority, ticket_id),
+        )
+        r = cur.fetchone()
+        if not r:
+            conn.rollback()
+            return jsonify({"error": "Ticket not found after update"}), 404
+
+        # notify student if priority changed
+        if (before.get("priority") or "").lower() != priority:
+            link = f"/tickets/{ticket_id}"
+            title = before.get("title") or f"Ticket #{ticket_id}"
+            create_notification(
+                conn,
+                user_id=before["created_by"],
+                type_="PRIORITY_CHANGED",
+                message=f"Your ticket ({title}) priority changed to {priority}.",
+                link=link,
+            )
+
+        conn.commit()
+        return jsonify({"ticket": {"id": r["id"], "priority": r["priority"]}}), 200
+
+    except psycopg2.Error as e:
+        conn.rollback()
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()

@@ -26,6 +26,15 @@ function TicketDetails({ user, onTicketsChanged }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // ✅ NEW: status editing state (draft + saving + small message)
+  const [statusDraft, setStatusDraft] = useState("open");
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [statusMsg, setStatusMsg] = useState("");
+
+  const [priorityDraft, setPriorityDraft] = useState("low");
+  const [savingPriority, setSavingPriority] = useState(false);
+  const [priorityMsg, setPriorityMsg] = useState("");
+
   const canChangeStatus = user && (user.role === "admin" || user.role === "technician");
   const canArchiveResolved = user && (user.role === "admin" || user.role === "technician");
   const canUnarchive = user && user.role === "admin";
@@ -36,6 +45,13 @@ function TicketDetails({ user, onTicketsChanged }) {
     try {
       const data = await apiFetch(`/tickets/${ticketId}`);
       setTicket(data.ticket);
+
+      const p = (data.ticket?.priority || "low").toLowerCase();
+      setPriorityDraft(p);
+
+      // ✅ NEW: keep statusDraft synced when ticket loads
+      const s = (data.ticket?.status || "open").toLowerCase();
+      setStatusDraft(s);
     } catch (e) {
       setError(e?.message || "Failed to load ticket");
       setTicket(null);
@@ -49,7 +65,6 @@ function TicketDetails({ user, onTicketsChanged }) {
       const data = await apiFetch("/assignees");
       setAssignees(data.assignees || []);
     } catch (e) {
-      // Don't break the page if assignee list fails
       console.error(e);
     }
   }, []);
@@ -83,23 +98,36 @@ function TicketDetails({ user, onTicketsChanged }) {
     if (user.role === "admin") loadAssignees();
   }, [ticketId, user, loadTicket, loadAssignees]);
 
-  // Keep dropdown in sync with backend assignment
+  // Keep assignment dropdown in sync with backend assignment
   useEffect(() => {
     if (!ticket) return;
     setSelectedAssignee(ticket.assignedTo ?? "");
+    // ✅ NEW: also keep statusDraft synced if ticket changes for any reason
+    setStatusDraft((ticket.status || "open").toLowerCase());
+    setPriorityDraft((ticket.priority || "low").toLowerCase());
   }, [ticket]);
 
-  const updateStatus = async (nextStatus) => {
+  // ✅ CHANGED: updateStatus now saves whatever is in statusDraft (not on every change)
+  const updateStatus = async () => {
     try {
       setError("");
+      setStatusMsg("");
+      setSavingStatus(true);
+
       await apiFetch(`/tickets/${ticketId}/status`, {
         method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
+        body: JSON.stringify({ status: statusDraft }),
       });
+
       await loadTicket();
       if (onTicketsChanged) await onTicketsChanged();
+
+      setStatusMsg("Saved!");
+      setTimeout(() => setStatusMsg(""), 1500);
     } catch (e) {
       setError(e?.message || "Failed to update status");
+    } finally {
+      setSavingStatus(false);
     }
   };
 
@@ -124,7 +152,36 @@ function TicketDetails({ user, onTicketsChanged }) {
     }
   };
 
+  const updatePriority = async () => {
+    try {
+      setError("");
+      setPriorityMsg("");
+      setSavingPriority(true);
+
+      await apiFetch(`/tickets/${ticketId}/priority`, {
+        method: "PATCH",
+        body: JSON.stringify({ priority: priorityDraft }),
+      });
+
+      await loadTicket();
+      if (onTicketsChanged) await onTicketsChanged();
+
+      setPriorityMsg("Saved!");
+      setTimeout(() => setPriorityMsg(""), 1500);
+    } catch (e) {
+      setError(e?.message || "Failed to update priority");
+    } finally {
+      setSavingPriority(false);
+    }
+  };
+
   if (!user) return <p>Please log in to view this ticket.</p>;
+
+  const currentStatus = (ticket?.status || "open").toLowerCase();
+  const statusChanged = statusDraft !== currentStatus;
+  const currentPriority = (ticket?.priority || "low").toLowerCase();
+  const priorityChanged = priorityDraft !== currentPriority;
+  const canChangePriority = user && (user.role === "admin" || user.role === "technician");
 
   return (
     <div style={{ maxWidth: 900 }}>
@@ -165,27 +222,84 @@ function TicketDetails({ user, onTicketsChanged }) {
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
             {canChangeStatus ? (
-              <label style={{ fontSize: 12, border: "1px solid #ccc", padding: "6px 10px", borderRadius: 999 }}>
-                Status{" "}
+              <label
+                style={{
+                  fontSize: 12,
+                  border: "1px solid #ccc",
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                Status
                 <select
-                  value={ticket.status || "open"}
-                  onChange={(e) => updateStatus(e.target.value)}
-                  style={{ marginLeft: 6, padding: 6 }}
-                  disabled={!!ticket.archivedAt} // optional: prevent changing status while archived
+                  value={statusDraft}
+                  onChange={(e) => setStatusDraft(e.target.value)}
+                  style={{ padding: 6 }}
+                  disabled={!!ticket.archivedAt || savingStatus}
                 >
                   <option value="open">Open</option>
                   <option value="in_progress">In Progress</option>
                   <option value="resolved">Resolved</option>
                 </select>
+
+                <button
+                  onClick={updateStatus}
+                  disabled={!!ticket.archivedAt || savingStatus || !statusChanged}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  {savingStatus ? "Saving..." : "Save"}
+                </button>
+
+                {statusMsg && <span style={{ color: "green" }}>{statusMsg}</span>}
               </label>
             ) : (
               <span style={{ border: "1px solid #ccc", padding: "2px 8px", borderRadius: 999, fontSize: 12 }}>
                 Status: {(ticket.status || "unknown").toUpperCase()}
               </span>
             )}
-            <span style={{ border: "1px solid #ccc", padding: "2px 8px", borderRadius: 999, fontSize: 12 }}>
-              Priority: {(ticket.priority || "low").toUpperCase()}
-            </span>
+
+            {canChangePriority ? (
+              <label
+                style={{
+                  fontSize: 12,
+                  border: "1px solid #ccc",
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                Priority
+                <select
+                  value={priorityDraft}
+                  onChange={(e) => setPriorityDraft(e.target.value)}
+                  style={{ padding: 6 }}
+                  disabled={!!ticket.archivedAt || savingPriority}
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+
+                <button
+                  onClick={updatePriority}
+                  disabled={!!ticket.archivedAt || savingPriority || !priorityChanged}
+                  style={{ padding: "6px 10px", borderRadius: 8 }}
+                >
+                  {savingPriority ? "Saving..." : "Save"}
+                </button>
+
+                {priorityMsg && <span style={{ color: "green" }}>{priorityMsg}</span>}
+              </label>
+            ) : (
+              <span style={{ border: "1px solid #ccc", padding: "2px 8px", borderRadius: 999, fontSize: 12 }}>
+                Priority: {(ticket.priority || "low").toUpperCase()}
+              </span>
+            )}
           </div>
 
           <p style={{ marginTop: 10, marginBottom: 0, fontSize: 12, color: "#666" }}>
@@ -227,7 +341,6 @@ function TicketDetails({ user, onTicketsChanged }) {
             <TicketComments
               ticketId={ticket.id}
               onCommentPosted={() => {
-                // refresh ticket (and optionally refresh list view in App)
                 loadTicket();
                 if (onTicketsChanged) onTicketsChanged();
               }}

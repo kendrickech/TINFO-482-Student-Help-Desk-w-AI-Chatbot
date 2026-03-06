@@ -9,6 +9,7 @@ import Tickets from "./components/Tickets";
 import TechQueue from "./components/TechQueue";
 import TicketDetails from "./components/TicketDetails";
 import NotificationBell from "./components/NotificationBell";
+import Dashboard from "./components/Dashboard";
 
 const API_BASE = "http://localhost:5000";
 const canManageTickets = (u) => u?.role === "admin" || u?.role === "technician";
@@ -113,16 +114,6 @@ function Home() {
                 </NavLink>
             </div>
         </div>
-    );
-}
-
-function Dashboard({ user }) {
-    return (
-        <>
-            <h1>Dashboard</h1>
-            <p>Welcome {user.username}!</p>
-            <p>Role: {user.role}</p>
-        </>
     );
 }
 
@@ -409,7 +400,7 @@ export default function App() {
                     path="/dashboard"
                     element={
                         <ProtectedRoute user={user}>
-                            <Dashboard user={user} />
+                            <Dashboard user={user} tickets={tickets}/>
                         </ProtectedRoute>
                     }
                 />
