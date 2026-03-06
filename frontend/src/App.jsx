@@ -1,326 +1,443 @@
 ﻿import { useEffect, useState, useCallback } from "react";
-import { NavLink, Routes, Route, Navigate, useNavigate } from "react-router-dom";
+import { NavLink, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 
 import Login from "./components/Login";
 import Register from "./components/Register";
 import Admin from "./components/Admin";
 import Tickets from "./components/Tickets";
+import TechQueue from "./components/TechQueue";
 import TicketDetails from "./components/TicketDetails";
+import NotificationBell from "./components/NotificationBell";
+import Dashboard from "./components/Dashboard";
 
 const API_BASE = "http://localhost:5000";
+const canManageTickets = (u) => u?.role === "admin" || u?.role === "technician";
+const canDeleteTickets = (u) => u?.role === "admin";
 
 function NavItem({ to, children }) {
-  return (
-    <NavLink
-      to={to}
-      style={({ isActive }) => ({
-        textDecoration: "none",
-        color: "black",
-        padding: "8px 10px",
-        borderRadius: 10,
-        background: isActive ? "lightgray" : "transparent",
-      })}
-    >
-      {children}
-    </NavLink>
-  );
+    return (
+        <NavLink
+            to={to}
+            className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+        >
+            {children}
+        </NavLink>
+    );
 }
 
 function Layout({ user, onLogout, children }) {
-  return (
-    <div style={{ fontFamily: "Arial" }}>
-      <nav
-        style={{
-          padding: 16,
-          borderBottom: "1px solid #ddd",
-          display: "flex",
-          gap: 12,
-          alignItems: "center",
-        }}
-      >
-        <strong style={{ marginRight: 8 }}>Help Desk</strong>
+    return (
+        <div className="app-shell">
+            <nav className="topbar">
+                <strong className="brand">Help Desk</strong>
 
-        {!user && (
-          <>
-            <NavItem to="/login">Login</NavItem>
-            <NavItem to="/register">Register</NavItem>
-          </>
-        )}
+                {!user ? (
+                    <>
+                        <NavItem to="/login">Login</NavItem>
+                        <NavItem to="/register">Register</NavItem>
+                    </>
+                ) : (
+                    <>
+                        <NavItem to="/dashboard">Dashboard</NavItem>
+                        <NavItem to="/tickets">Tickets</NavItem>
+                        {(user.role === "admin" || user.role === "technician") && (
+                            <NavItem to="/queue">My Queue</NavItem>
+                        )}
+                        {user.role === "admin" && <NavItem to="/admin">Admin</NavItem>}
 
-        {user && (
-          <>
-            <NavItem to="/dashboard">Dashboard</NavItem>
-            <NavItem to="/tickets">Tickets</NavItem>
+                        <div className="nav-right">
+                            <span className="user-chip">
+                                {user.username} ({user.role})
+                            </span>
 
-            {user.role === "admin" && <NavItem to="/admin">Admin</NavItem>}
+                            <NotificationBell user={user} />
 
-            <span style={{ marginLeft: "auto" }}>
-              {user.username} ({user.role})
-            </span>
-            <button onClick={onLogout} style={{ padding: "6px 10px" }}>
-              Log out
-            </button>
-          </>
-        )}
-      </nav>
+                            <button onClick={onLogout} className="logout-btn">
+                                Log out
+                            </button>
+                        </div>
+                    </>
+                )}
+            </nav>
 
-      <main style={{ padding: 24 }}>{children}</main>
-    </div>
-  );
+            <main className="page">{children}</main>
+        </div>
+    );
 }
 
 function Home() {
-  return (
-    <div style={{ textAlign: "center", marginTop: 80 }}>
-      <h1>Campus IT Help Desk</h1>
-      <p style={{ color: "#555", marginTop: 10 }}>Submit and manage IT support requests</p>
+    return (
+        <div className="hero">
+            <h1>Campus IT Help Desk</h1>
+            <p>Submit and manage IT support requests</p>
 
-      <div style={{ marginTop: 30, display: "flex", gap: 12, justifyContent: "center" }}>
-        <NavLink to="/login">Login</NavLink>
+            <div className="hero-actions">
+                <NavLink to="/login" className="primary-btn" style={{ textDecoration: "none" }}>
+                    Login
+                </NavLink>
 
-        <NavLink
-          to="/register"
-          style={{
-            background: "white",
-            color: "black",
-            border: "1px solid #ccc",
-            padding: "6px 10px",
-            borderRadius: 8,
-            textDecoration: "none",
-          }}
-        >
-          Register
-        </NavLink>
-      </div>
-    </div>
-  );
-}
-
-function Dashboard({ user }) {
-  return (
-    <>
-      <h1>Dashboard</h1>
-      <p>Welcome {user.username}!</p>
-      <p>Role: {user.role}</p>
-    </>
-  );
+                <NavLink to="/register" className="secondary-btn" style={{ textDecoration: "none" }}>
+                    Register
+                </NavLink>
+            </div>
+        </div>
+    );
 }
 
 function ProtectedRoute({ user, children }) {
-  if (!user) return <Navigate to="/login" replace />;
-  return children;
+    if (!user) return <Navigate to="/login" replace />;
+    return children;
 }
 
 function AdminRoute({ user, children }) {
-  if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
-  return children;
+    if (!user) return <Navigate to="/login" replace />;
+    if (user.role !== "admin") return <Navigate to="/dashboard" replace />;
+    return children;
 }
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [checking, setChecking] = useState(true);
+    const [user, setUser] = useState(null);
+    const [checking, setChecking] = useState(true);
 
-  const [tickets, setTickets] = useState([]);
-  const [ticketsLoading, setTicketsLoading] = useState(false);
+    const [tickets, setTickets] = useState([]);
+    const [ticketsLoading, setTicketsLoading] = useState(false);
 
-  const navigate = useNavigate();
+    const [archivedTickets, setArchivedTickets] = useState([]);
+    const [ticketsView, setTicketsView] = useState("active"); // "active" | "archived"
 
-  // --- Session hydrate: /me ---
-  const fetchMe = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/me`, { credentials: "include" });
-      if (!res.ok) {
-        setUser(null);
-        return null;
-      }
+    const navigate = useNavigate();
 
-      const data = await res.json();
+    const fetchMe = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE}/me`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
 
-      if (data?.authenticated) {
-        const nextUser = {
-          username: data.username ?? "user",
-          role: data.user_role ?? "student",
-        };
-        setUser(nextUser);
-        return nextUser;
-      }
+            if (!res.ok || !data?.authenticated) {
+                setUser(null);
+                return null;
+            }
 
-      setUser(null);
-      return null;
-    } catch {
-      setUser(null);
-      return null;
-    }
-  }, []);
+            const nextUser = {
+                id: data.user_id,
+                username: data.username ?? "user",
+                role: data.user_role ?? "student",
+            };
 
-  // --- Load tickets: GET /tickets ---
-  const loadTickets = useCallback(async () => {
-    setTicketsLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/tickets`, {
-        credentials: "include",
-      });
-      const data = await res.json().catch(() => ({}));
+            setUser(nextUser);
+            return nextUser;
+        } catch {
+            setUser(null);
+            return null;
+        }
+    }, []);
 
-      if (!res.ok) {
-        // if unauthenticated, clear tickets
-        setTickets([]);
-        return;
-      }
+    const loadTickets = useCallback(async () => {
+        setTicketsLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/tickets`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
 
-      setTickets(Array.isArray(data.tickets) ? data.tickets : []);
-    } finally {
-      setTicketsLoading(false);
-    }
-  }, []);
+            if (!res.ok) {
+                setTickets([]);
+                return;
+            }
 
-  // On first load, check session
-  useEffect(() => {
-    (async () => {
-      setChecking(true);
-      const u = await fetchMe();
-      setChecking(false);
+            setTickets(Array.isArray(data.tickets) ? data.tickets : []);
+        } finally {
+            setTicketsLoading(false);
+        }
+    }, []);
 
-      // If already logged in, load tickets immediately
-      if (u) await loadTickets();
-    })();
-  }, [fetchMe, loadTickets]);
+    const loadArchivedTickets = useCallback(async () => {
+        setTicketsLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/tickets/archived`, { credentials: "include" });
+            const data = await res.json().catch(() => ({}));
 
-  // Also reload tickets when user changes (login/logout)
-  useEffect(() => {
-    if (!user) {
-      setTickets([]);
-      return;
-    }
-    loadTickets();
-  }, [user, loadTickets]);
+            if (!res.ok) {
+            setArchivedTickets([]);
+            return;
+            }
 
-  // --- Create ticket: POST /tickets ---
-  const createTicket = async ({ title, description, priority }) => {
-    const res = await fetch(`${API_BASE}/tickets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ title, description, priority }),
-    });
+            setArchivedTickets(Array.isArray(data.tickets) ? data.tickets : []);
+        } finally {
+            setTicketsLoading(false);
+        }
+    }, []);
 
-    const data = await res.json().catch(() => ({}));
+    const updateTicket = async (ticketId, updates) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify(updates),
+        });
 
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to create ticket");
-    }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to update ticket");
 
-    // Append the server-created ticket (has id + createdAt + createdBy)
-    setTickets((prev) => [...prev, data.ticket]);
-  };
+        setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)));
+        return data.ticket;
+    };
 
-  // --- Delete ticket: DELETE /tickets/:id (admin only) ---
-  const deleteTicket = async (ticketId) => {
-    const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
-      method: "DELETE",
-      credentials: "include",
-    });
+    const createTicket = async ({ title, description, priority }) => {
+        const res = await fetch(`${API_BASE}/tickets`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ title, description, priority }),
+        });
 
-    const data = await res.json().catch(() => ({}));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to create ticket");
 
-    if (!res.ok) {
-      throw new Error(data.error || "Failed to delete ticket");
-    }
+        setTickets((prev) => [...prev, data.ticket]);
+    };
 
-    setTickets((prev) => prev.filter((t) => t.id !== ticketId));
-  };
+    const deleteTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+            method: "DELETE",
+            credentials: "include",
+        });
 
-  const handleLoginSuccess = useCallback(async () => {
-    const u = await fetchMe();
-    if (u) {
-      navigate("/dashboard", { replace: true });
-      await loadTickets();
-    }
-    return u;
-  }, [fetchMe, loadTickets, navigate]);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to delete ticket");
 
-  const handleLogout = async () => {
-    try {
-      await fetch(`${API_BASE}/logout`, {
-        method: "POST",
-        credentials: "include",
-      });
-    } catch {
-      // ignore
-    } finally {
-      setUser(null);
-      setTickets([]);
-      navigate("/login", { replace: true });
-    }
-  };
+        setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+    };
 
-  if (checking) return <div style={{ padding: 24 }}>Loading...</div>;
+    const archiveTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/archive`, {
+            method: "PATCH",
+            credentials: "include",
+        });
 
-  return (
-    <Layout user={user} onLogout={handleLogout}>
-      <Routes>
-        <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
-        <Route path="/home" element={<Home />} />
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to archive ticket");
 
-        <Route
-          path="/login"
-          element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLoginSuccess} />}
-        />
+        // Refresh lists so UI stays correct
+        if (ticketsView === "active") {
+            await loadTickets();              // ticket disappears from active list
+        } else {
+            // if somehow archiving while viewing archived list
+            await loadArchivedTickets();
+        }
 
-        <Route
-          path="/register"
-          element={user ? <Navigate to="/dashboard" replace /> : <Register />}
-        />
+        return data;
+    };
 
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute user={user}>
-              <Dashboard user={user} />
-            </ProtectedRoute>
-          }
-        />
+    const unarchiveTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/unarchive`, {
+            method: "PATCH",
+            credentials: "include",
+        });
 
-        <Route
-          path="/tickets"
-          element={
-            <ProtectedRoute user={user}>
-              <div>
-                {ticketsLoading && <p style={{ color: "#666" }}>Loading tickets...</p>}
-                <Tickets
-                  user={user}
-                  tickets={tickets}
-                  onCreateTicket={createTicket}
-                  onDeleteTicket={deleteTicket}
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to unarchive ticket");
+
+        // Refresh both lists so it moves correctly
+        await loadArchivedTickets();        // ticket disappears from archived list
+        await loadTickets();                // ticket appears in active list
+
+        return data;
+    };
+
+    const location = useLocation();
+
+    useEffect(() => {
+        // whenever you leave the tickets page, snap back to active view
+        if (location.pathname !== "/tickets") {
+            setTicketsView("active");
+        }
+    }, [location.pathname]);
+
+    useEffect(() => {
+        if (location.pathname === "/tickets" && user) {
+            setTicketsView("active");
+            loadTickets();
+        }
+    }, [location.pathname, user, loadTickets]);
+
+    useEffect(() => {
+        (async () => {
+            setChecking(true);
+            const u = await fetchMe();
+            setChecking(false);
+            if (u) await loadTickets();
+        })();
+    }, [fetchMe, loadTickets]);
+
+    useEffect(() => {
+        if (!user) {
+            setTickets([]);
+            setArchivedTickets([]);
+            setTicketsView("active");
+            return;
+        }
+
+        setTicketsView("active");
+        loadTickets();
+    }, [user, loadTickets]);
+
+    const handleLoginSuccess = useCallback(async () => {
+        const u = await fetchMe();
+        if (u) {
+            navigate("/dashboard", { replace: true });
+            await loadTickets();
+        }
+        return u;
+    }, [fetchMe, loadTickets, navigate]);
+
+    const handleLogout = async () => {
+        try {
+            await fetch(`${API_BASE}/logout`, { method: "POST", credentials: "include" });
+        } catch {
+            // ignore
+        } finally {
+            setUser(null);
+            setTickets([]);
+            navigate("/login", { replace: true });
+        }
+    };
+
+    const handleToggleArchived = useCallback(
+        async (showArchived) => {
+            if (showArchived) {
+            setTicketsView("archived");
+            await loadArchivedTickets();
+            } else {
+            setTicketsView("active");
+            await loadTickets();
+            }
+        },
+        [loadArchivedTickets, loadTickets]
+    );
+
+    const assignTicket = async (ticketId, assignedTo) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/assign`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ assignedTo }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to update assignment");
+
+        // refresh list depending on view
+        if (ticketsView === "archived") await loadArchivedTickets();
+        else await loadTickets();
+
+        return data;
+    };
+
+    const claimTicket = async (ticketId) => {
+        const res = await fetch(`${API_BASE}/tickets/${ticketId}/claim`, {
+            method: "PATCH",
+            credentials: "include",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to claim/unclaim");
+
+        if (ticketsView === "archived") await loadArchivedTickets();
+        else await loadTickets();
+
+        return data;
+    };
+
+    const refreshTickets = useCallback(async () => {
+        if (ticketsView === "archived") await loadArchivedTickets();
+        else await loadTickets();
+    }, [ticketsView, loadArchivedTickets, loadTickets]);
+
+    if (checking) return <div style={{ padding: 24 }}>Loading...</div>;
+
+    return (
+        <Layout user={user} onLogout={handleLogout}>
+            <Routes>
+                <Route path="/" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+                <Route path="/home" element={<Home />} />
+
+                <Route
+                    path="/login"
+                    element={user ? <Navigate to="/dashboard" replace /> : <Login onLogin={handleLoginSuccess} />}
                 />
-              </div>
-            </ProtectedRoute>
-          }
-        />
+                <Route path="/register" element={user ? <Navigate to="/dashboard" replace /> : <Register />} />
 
-        <Route
-          path="/tickets/:ticketId"
-          element={
-            <ProtectedRoute user={user}>
-              <TicketDetails user={user} onTicketsChanged={loadTickets} />
-            </ProtectedRoute>
-          }
-        />
-        
-        <Route path="*" element={<Navigate to="/tickets" replace />} />
+                <Route
+                    path="/dashboard"
+                    element={
+                        <ProtectedRoute user={user}>
+                            <Dashboard user={user} tickets={tickets}/>
+                        </ProtectedRoute>
+                    }
+                />
 
-        <Route
-          path="/admin"
-          element={
-            <AdminRoute user={user}>
-              <Admin currentUser={user} />
-            </AdminRoute>
-          }
-        />
+                <Route
+                    path="/tickets"
+                    element={
+                        <ProtectedRoute user={user}>
+                            <div>
+                                {ticketsLoading && <p style={{ color: "#666" }}>Loading tickets...</p>}
+                                <Tickets
+                                    user={user}
+                                    tickets={ticketsView == "archived" ? archivedTickets : tickets}
+                                    onCreateTicket={createTicket}
+                                    onDeleteTicket={deleteTicket}
+                                    // onUpdateTicket removed
+                                    canManage={canManageTickets(user)}
+                                    canDelete={canDeleteTickets(user)}
+                                    onToggleArchived={handleToggleArchived}
+                                    onArchiveTicket={archiveTicket}
+                                    onUnarchiveTicket={unarchiveTicket}
+                                    onAssignTicket={assignTicket}
+                                    onClaimTicket={claimTicket}
+                                />
+                            </div>
+                        </ProtectedRoute>
+                    }
+                />
 
-        <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
-      </Routes>
-    </Layout>
-  );
+                <Route
+                    path="/tickets/:ticketId"
+                    element={
+                        <ProtectedRoute user={user}>
+                            <TicketDetails
+                                user={user}
+                                onTicketsChanged={refreshTickets}
+                                onUpdateTicket={updateTicket}
+                                canManage={canManageTickets(user)}
+                                canDelete={canDeleteTickets(user)}
+                                onDeleteTicket={deleteTicket}
+                            />
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/queue"
+                    element={
+                        <ProtectedRoute user={user}>
+                            {user && (user.role === "admin" || user.role === "technician") ? (
+                                <TechQueue user={user} tickets={tickets} onUpdateTicket={updateTicket} />
+                            ) : (
+                                <Navigate to="/tickets" replace />
+                            )}
+                        </ProtectedRoute>
+                    }
+                />
+
+                <Route
+                    path="/admin"
+                    element={
+                        <AdminRoute user={user}>
+                            <Admin currentUser={user} />
+                        </AdminRoute>
+                    }
+                />
+
+                <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
+
+            </Routes>
+        </Layout>
+    );
 }
