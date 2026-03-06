@@ -100,6 +100,7 @@ const handleSearch = async () => {
           cursor: "pointer",
         }}
     >
+      {/* mainly need to fix SQL data fields*/}
           <p><strong>Title:</strong> {ticket.title}</p>
           <p><strong>Description:</strong> {ticket.description}</p>
           <p><strong>Status:</strong> {ticket.status}</p>
