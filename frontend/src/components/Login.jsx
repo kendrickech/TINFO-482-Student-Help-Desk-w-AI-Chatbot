@@ -1,74 +1,99 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+const API_BASE = "http://localhost:5000";
+
 function Login({ onLogin }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
-  const navigate = useNavigate();
+    const [username, setUsername] = useState("");
+    const [password, setPassword] = useState("");
+    const [message, setMessage] = useState("");
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setMessage("");
+    const navigate = useNavigate();
 
-    try {
-      const response = await fetch("http://localhost:5000/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ username, password }),
-      });
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setMessage("");
 
-      // Try to parse JSON safely (some backends return empty body on errors)
-      let data = {};
-      try {
-        data = await response.json();
-      } catch {
-        data = {};
-      }
+        try {
+            const response = await fetch(`${API_BASE}/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ username, password }),
+            });
 
-      if (!response.ok) {
-        setMessage(data.error || data.message || "Login failed.");
-        return;
-      }
+            let data = {};
+            try {
+                data = await response.json();
+            } catch { }
 
-      setMessage(data.message || "Logged in!");
+            if (!response.ok) {
+                setMessage(data.error || data.message || "Login failed.");
+                return;
+            }
 
-      // Tell App.jsx “login succeeded” so it can fetch /me and set user
-      if (onLogin) await onLogin();
+            if (onLogin) await onLogin();
 
-      // If App.jsx doesn't navigate, do it here as a fallback
-      navigate("/dashboard", { replace: true });
-    } catch (err) {
-      console.log(err);
-      setMessage("Network error. Is the Flask server running?");
-    }
-  };
+            navigate("/dashboard", { replace: true });
+        } catch {
+            setMessage("Network error. Is the Flask server running?");
+        }
+    };
 
-  return (
-    <div>
-      <h2>Login</h2>
+    return (
+        <div className="page">
+            <div
+                className="card"
+                style={{
+                    maxWidth: 420,
+                    margin: "80px auto",
+                    padding: 30,
+                }}
+            >
+                <h2 className="page-title" style={{ marginBottom: 16 }}>
+                    Help Desk Login
+                </h2>
 
-      <form onSubmit={handleSubmit}>
-        <input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
+                <form
+                    onSubmit={handleSubmit}
+                    style={{ display: "grid", gap: 14 }}
+                >
+                    <div>
+                        <label style={{ fontSize: 14 }}>Username</label>
+                        <input
+                            className="input"
+                            value={username}
+                            onChange={(e) => setUsername(e.target.value)}
+                            placeholder="Enter username"
+                            required
+                        />
+                    </div>
 
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+                    <div>
+                        <label style={{ fontSize: 14 }}>Password</label>
+                        <input
+                            className="input"
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter password"
+                            required
+                        />
+                    </div>
 
-        <button type="submit">Log in</button>
-      </form>
+                    <button type="submit" className="primary-btn">
+                        Log in
+                    </button>
+                </form>
 
-      {message && <p>{message}</p>}
-    </div>
-  );
+                {message && (
+                    <p style={{ marginTop: 12, color: "crimson" }}>
+                        {message}
+                    </p>
+                )}
+            </div>
+        </div>
+    );
 }
 
 export default Login;
