@@ -4,7 +4,7 @@ from datetime import datetime
 import psycopg2
 
 from db import get_db_connection
-from auth import login_required, admin_required
+from auth import login_required, admin_required, technician_required
 
 tickets_bp = Blueprint("tickets", __name__)
 
@@ -390,6 +390,124 @@ def delete_ticket(ticket_id):
             return jsonify({"error": "Ticket not found"}), 404
 
         return jsonify({"message": "Ticket deleted"}), 200
+    finally:
+        cur.close()
+        conn.close()
+
+@tickets_bp.route("/tickets/archived", methods=["GET"])
+@login_required
+@technician_required
+def list_archived_tickets():
+
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            SELECT
+              t.ticket_id AS id,
+              t.title,
+              t.description,
+              t.priority,
+              t.status,
+              t.created_at AS "createdAt",
+              t.archived_at AS "archivedAt",
+              creator.username AS "createdBy",
+              t.assigned_to AS "assignedTo",
+              assignee.username AS "assignedUsername",
+              assignee.user_role AS "assignedRole"
+            FROM ticket_table t
+            JOIN user_table creator ON creator.user_id = t.created_by
+            LEFT JOIN user_table assignee ON assignee.user_id = t.assigned_to
+            WHERE t.archived_at IS NOT NULL
+            ORDER BY t.archived_at DESC
+            """
+        )
+
+        rows = cur.fetchall()
+        tickets = []
+        for r in rows:
+            tickets.append(
+                {
+                    "id": r["id"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "priority": r["priority"],
+                    "status": r["status"],
+                    "createdBy": r["createdBy"],
+                    "createdAt": iso(r.get("createdAt")),
+                    "archivedAt": iso(r.get("archivedAt")),
+                    "assignedTo": r.get("assignedTo"),
+                    "assignedUsername": r.get("assignedUsername"),
+                    "assignedRole": r.get("assignedRole"),
+                }
+            )
+
+        return jsonify({"tickets": tickets}), 200
+
+    except psycopg2.Error as e:
+        return jsonify({"error": "Database error", "details": str(e)}), 500
+    finally:
+        cur.close()
+        conn.close()
+
+
+@tickets_bp.route("/tickets/<int:ticket_id>/archive", methods=["PATCH"])
+@login_required
+@technician_required  # keep this if it includes admin too
+def archive_ticket(ticket_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            UPDATE ticket_table
+            SET archived_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ticket_id = %s
+              AND archived_at IS NULL
+              AND status = 'resolved'
+            RETURNING ticket_id AS id, archived_at
+            """,
+            (ticket_id,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+
+        if not row:
+            return jsonify({"error": "Only resolved, unarchived tickets can be archived"}), 400
+
+        return jsonify({"ok": True, "ticket": row}), 200
+    finally:
+        cur.close()
+        conn.close()
+
+
+@tickets_bp.route("/tickets/<int:ticket_id>/unarchive", methods=["PATCH"])
+@login_required
+@admin_required
+def unarchive_ticket(ticket_id):
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    try:
+        cur.execute(
+            """
+            UPDATE ticket_table
+            SET archived_at = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ticket_id = %s
+              AND archived_at IS NOT NULL
+            RETURNING ticket_id AS id
+            """,
+            (ticket_id,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+
+        if not row:
+            return jsonify({"error": "Ticket not found or not archived"}), 404
+
+        return jsonify({"ok": True, "ticket": row}), 200
     finally:
         cur.close()
         conn.close()
