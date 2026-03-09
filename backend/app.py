@@ -2,12 +2,14 @@
 import os
 from flask import Flask, jsonify
 from flask_cors import CORS
-from auth import auth_bp
-from dotenv import load_dotenv
 from pathlib import Path
+from dotenv import load_dotenv
+
+from auth import auth_bp
 from users_routes import users_bp
 from tickets import tickets_bp
 from notifications_routes import notifications_bp
+from ai import ai_bp
 
 env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path, override=True)
@@ -20,6 +22,7 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(users_bp)
 app.register_blueprint(tickets_bp)
 app.register_blueprint(notifications_bp)
+app.register_blueprint(ai_bp, url_prefix="/ai")
 
 @app.get("/health")
 def health():

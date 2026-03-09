@@ -9,6 +9,7 @@ import TechQueue from "./components/TechQueue";
 import TicketDetails from "./components/TicketDetails";
 import NotificationBell from "./components/NotificationBell";
 import Dashboard from "./components/Dashboard";
+import Chatbot from "./components/Chatbot";
 
 const API_BASE = "http://localhost:5000";
 const canManageTickets = (u) => u?.role === "admin" || u?.role === "technician";
@@ -61,6 +62,8 @@ function Layout({ user, onLogout, children }) {
             </nav>
 
             <main className="page">{children}</main>
+
+            {user && <Chatbot />}
         </div>
     );
 }
