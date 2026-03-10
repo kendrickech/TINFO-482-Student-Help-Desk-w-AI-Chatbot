@@ -1,94 +1,69 @@
-# need to import Blueprint also from flask
-from flask import Flask, request, jsonify
-
-# do not need CORS here either, only in app.py
-from flask_cors import CORS
-
-# remove JWT, not using in the project so this whole line below
-from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt, JWTManager
+# create a blueprint here from Flask, look at top of tickets.py for example
+import os
+from flask import Blueprint, request, jsonify, session
+from psycopg2.extras import RealDictCursor
+from datetime import datetime
 import psycopg2
 
-# not used so not needed
-import os
+from db import get_db_connection
+from auth import login_required, admin_required
 
-# create a blueprint here from Flask, look at top of tickets.py for example
-# then call it in the app.py, examples there as well
+search_tickets_bp = Blueprint("search_tickets", __name__)
 
-# everything below not needed here
-app = Flask(__name__)
-CORS(app, supports_credentials=True)
-app.config["JWT_SECRET_KEY"] = "super-secret-key"
-app.config["JWT_TOKEN_LOCATION"] = ["headers"]
+VALID_PRIORITY = {"low", "medium", "high"}
 
-# remove this since we're not using JWT
-jwt = JWTManager(app)
+def iso(dt):
+    return dt.isoformat() if isinstance(dt, datetime) else None
 
-# we have a get_db_connection() function in db.py. import from there
 def get_db_connection():
-    return psycopg2.connect(
-        host="localhost",
-        database="your_database",
-        user="your_user",
-        password="your_password"
-    )
-
-
-@app.route("/tickets/search-tickets", methods=["GET"])
-# not using JWT so remove @jwt_required
-@jwt_required()
-def search_tickets():
-    query = request.args.get("query")
-
-    if not query or not query.strip():
-        return jsonify({"message": "Search query required"}), 400
-
-    # again we are not using JWT. for role authentication, use the admin_required or technician_required
-    # from the auth.py file
-    current_user = get_jwt_identity()
-    claims = get_jwt()
-
-    if claims.get("role") != "admin":
-        return jsonify({"message": "Access denied"}), 403
+    
 
     try:
-        # using RealDictCursor makes it easier to index the dictionary, look at tickets.py or users_routes.py functions for examples
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # the names for the columns are incorrect, as well as the database name itself, look at supabase for correct names
-        cursor.execute(
-            """
-            SELECT id, title, description, status, email, student_number
-            FROM tickets
-            WHERE email ILIKE %s
-               OR CAST(student_number AS TEXT) ILIKE %s
-            ORDER BY id DESC
-            """,
-            (f"%{query}%", f"%{query}%")
+        connection = psycopg2.connect(
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT"),
+            dbname=os.getenv("DB_NAME"),
+            sslmode="require",  # required for Supabase/Neon
+            cursor_factory=RealDictCursor
         )
-
-        tickets = cursor.fetchall()
-
-        cursor.close()
-        conn.close()
-
-        results = []
-        for t in tickets:
-            results.append({
-                "id": t[0],
-                "title": t[1],
-                "description": t[2],
-                "status": t[3],
-                "email": t[4],
-                "student_number": t[5],
-            })
-
-        return jsonify(results), 200
-
+        return connection
     except Exception as e:
-        print("Search error:", e)
-        return jsonify({"message": "Server error"}), 500
+        print(f"Database connection failed: {e}")
+        raise
 
-# backend server is already started when running app.py so we do not need this here
-if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+
+@search_tickets_bp.route("/tickets/<int:ticket_id>", methods=["GET"])
+@login_required
+@admin_required
+def search_tickets():
+
+    search_value = request.args.get("query")
+
+    if not search_value:
+        return jsonify({"message": "Search query required"}), 400
+
+    conn = get_db_connection()
+    curr = conn.cursor(cursor_factory=RealDictCursor)
+
+    curr.execute("""
+        SELECT tickets.id,
+               tickets.title,
+               tickets.description,
+               tickets.status,
+               users.email,
+               users.student_number
+        FROM tickets
+        JOIN users ON tickets.user_id = users.id
+        WHERE users.email ILIKE %s
+           OR CAST(users.student_number AS TEXT) ILIKE %s
+        ORDER BY tickets.created_at DESC
+    """, (f"%{search_value}%", f"%{search_value}%"))
+
+    tickets = curr.fetchall()
+
+    curr.close()
+    conn.close()
+
+    return jsonify({"tickets": tickets}), 200
