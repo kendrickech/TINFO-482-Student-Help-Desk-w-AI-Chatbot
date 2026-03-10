@@ -398,39 +398,34 @@ def delete_ticket(ticket_id):
 @login_required
 @admin_required
 def search_tickets():
-    user_id = session.get("user_id")
-
-    conn = get_db_connection()
-    current_user = conn.execute(
-        "SELECT * FROM users WHERE id = ?",
-        (user_id,)
-    ).fetchone()
-
-    if current_user["role"] != "admin":
-        conn.close()
-        return jsonify({"message": "Unauthorized"}), 403
 
     search_value = request.args.get("query")
 
-    if not search_value or not search_value.strip():
+    if not search_value:
         return jsonify({"message": "Search query required"}), 400
 
     conn = get_db_connection()
+    curr = conn.cursor(cursor_factory=RealDictCursor)
 
-    tickets = conn.execute("""
-        SELECT tickets.id,
-               tickets.title,
-               tickets.description,
-               tickets.status,
-               users.email,
-               users.student_number
-        FROM tickets
-        JOIN users ON tickets.user_id = users.id
-        WHERE users.email LIKE ?
-           OR CAST(users.student_number AS TEXT) LIKE ?
-        ORDER BY tickets.created_at DESC
-    """, (f"%{search_value}%", f"%{search_value}%")).fetchall()
+    curr.execute("""
+        SELECT 
+            t.ticket_id as id,
+            t.title,
+            t.description,
+            t.status,
+            u.email,
+            u.user_id
+        FROM ticket_table t
+        JOIN user_table u ON t.created_by = u.user_id
+        WHERE u.email ILIKE %s
+           OR CAST(u.user_id AS TEXT) ILIKE %s
+        ORDER BY t.created_at DESC
+    """, (f"%{search_value}%", f"%{search_value}%"))
 
+    tickets = curr.fetchall()
+
+    curr.close()
     conn.close()
 
-    return jsonify([dict(ticket) for ticket in tickets]), 200
+    # RETURN ARRAY (important for frontend)
+    return jsonify(tickets), 200
