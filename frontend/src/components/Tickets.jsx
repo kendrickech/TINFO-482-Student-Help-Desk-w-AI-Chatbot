@@ -48,14 +48,22 @@ function Tickets({
         return tickets.filter((t) => t.createdBy === user.username);
     }, [tickets, user, canManage]);
 
+    const archivedTickets = useMemo(() => {
+        return visibleTickets.filter((t) => !!t.archivedAt);
+    }, [visibleTickets]);
+
     const activeTickets = useMemo(() => {
         if (showArchived) return [];
-        return visibleTickets.filter((t) => (t.status || "open") !== "resolved");
+        return visibleTickets.filter(
+            (t) => (t.status || "open") !== "resolved" && !t.archivedAt
+        );
     }, [visibleTickets, showArchived]);
 
     const resolvedTickets = useMemo(() => {
         if (showArchived) return [];
-        return visibleTickets.filter((t) => (t.status || "open") === "resolved");
+        return visibleTickets.filter(
+            (t) => (t.status || "open") === "resolved" && !t.archivedAt
+        );
     }, [visibleTickets, showArchived]);
 
     const handleSubmit = async (e) => {
@@ -413,14 +421,14 @@ function Tickets({
                 {showArchived ? (
                     <>
                         <h3 className="page-title" style={{ fontSize: 22 }}>
-                            {canManage ? "Archived Tickets" : "My Tickets"}
+                            {canManage ? "Archived Tickets" : "My Archived Tickets"}
                         </h3>
 
-                        {visibleTickets.length === 0 ? (
-                            <p style={{ color: "var(--uw-muted)" }}>No tickets yet.</p>
+                        {archivedTickets.length === 0 ? (
+                            <p style={{ color: "var(--uw-muted)" }}>No archived tickets.</p>
                         ) : (
                             <div className="ticket-grid" style={{ maxWidth: 900 }}>
-                                {visibleTickets.slice().reverse().map(TicketCard)}
+                                {archivedTickets.slice().reverse().map(TicketCard)}
                             </div>
                         )}
                     </>
