@@ -14,7 +14,13 @@ from aiHelper import (
 )
 
 ai_bp = Blueprint("ai", __name__)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+api_key = os.getenv("OPENAI_API_KEY")
+print(api_key)
+
+if not api_key:
+    raise RuntimeError("OPENAI_API_KEY is not set")
+
+client = OpenAI(api_key=api_key)
 
 policy_path = Path(__file__).resolve().parent / "chatbot_policy.txt"
 
@@ -60,7 +66,6 @@ def classify_ticket(issue):
                 },
             ],
         )
-
         raw = (classification.choices[0].message.content or "").strip()
         data = json.loads(raw)
 
