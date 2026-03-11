@@ -63,7 +63,7 @@ function Layout({ user, onLogout, children }) {
 
             <main className="page">{children}</main>
 
-            {user && <Chatbot />}
+            {user && <Chatbot user={user}/>}
         </div>
     );
 }
@@ -338,6 +338,9 @@ export default function App() {
         } catch {
             // ignore
         } finally {
+            if (user?.id) {
+                localStorage.removeItem(`chatbotMessages_user_${user.id}`);
+            }
             setUser(null);
             setTickets([]);
             navigate("/login", { replace: true });

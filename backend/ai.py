@@ -14,9 +14,9 @@ from aiHelper import (
 )
 
 ai_bp = Blueprint("ai", __name__)
-api_key = os.getenv("OPENAI_API_KEY")
-print(api_key)
+print("DEBUG: NEW ai.py LOADED")
 
+api_key = os.getenv("OPENAI_API_KEY")
 if not api_key:
     raise RuntimeError("OPENAI_API_KEY is not set")
 
@@ -31,7 +31,7 @@ except Exception:
 
 
 def extract_ticket_id(text):
-    match = re.search(r"\b(\d+)\b", text)
+    match = re.search(r"\b(\d+)\b", text or "")
     return int(match.group(1)) if match else None
 
 
@@ -66,6 +66,7 @@ def classify_ticket(issue):
                 },
             ],
         )
+
         raw = (classification.choices[0].message.content or "").strip()
         data = json.loads(raw)
 
@@ -80,18 +81,84 @@ def classify_ticket(issue):
             "priority": priority,
         }
 
-    except Exception:
+    except Exception as e:
+        print("DEBUG: classify_ticket failed:", e)
         return {
             "title": (issue[:100] or "AI Help Desk Ticket").strip()[:255],
             "priority": "medium",
         }
 
 
+def user_confirmed_ticket(message):
+    msg = (message or "").strip().lower()
+
+    confirmations = {
+        "yes",
+        "yes please",
+        "yeah",
+        "yep",
+        "sure",
+        "please do",
+        "create it",
+        "create ticket",
+        "open ticket",
+        "submit ticket",
+        "ok",
+        "okay",
+        "go ahead",
+        "do it",
+    }
+
+    return msg in confirmations
+
+
+def build_ticket_created_reply(ticket_id, title, priority):
+    return (
+        f"Support ticket created.\n\n"
+        f"Ticket Number: {ticket_id}\n"
+        f"Title: {title}\n"
+        f"Status: open\n"
+        f"Priority: {priority}\n\n"
+        f"You can track this ticket from your account."
+    )
+
+
+def create_ticket_for_issue(user_id, issue):
+    ticket_meta = classify_ticket(issue)
+    title = ticket_meta["title"]
+    priority = ticket_meta["priority"]
+
+    print("DEBUG: attempting ticket creation")
+    print("DEBUG: user_id =", user_id)
+    print("DEBUG: title =", title)
+    print("DEBUG: priority =", priority)
+    print("DEBUG: issue =", issue)
+
+    ticket_id = create_ticket_from_ai(
+        user_id,
+        title,
+        issue,
+        priority,
+    )
+
+    print("DEBUG: create_ticket_from_ai returned =", ticket_id)
+
+    if not ticket_id:
+        return None, None, None
+
+    return ticket_id, title, priority
+
+
 @ai_bp.post("/chat")
 def chat():
-    try:
-        user_id = session.get("user_id")
 
+
+    try:
+        print("DEBUG: /chat route hit")
+
+        user_id = session.get("user_id")
+        print("DEBUG: session user_id =", session.get("user_id"))
+        
         if not user_id:
             return jsonify({
                 "error": "Unauthorized. Please log in to use the chatbot."
@@ -99,64 +166,30 @@ def chat():
 
         data = request.get_json(silent=True) or {}
         user_message = (data.get("message") or "").strip()
+        print("DEBUG: incoming message =", user_message)
 
         if not user_message:
             return jsonify({"reply": "Please enter a message."}), 400
 
         lower_msg = user_message.lower()
 
-        if "history" not in session:
-            session["history"] = []
-
-        #
-        # HANDLE TICKET CREATION STEP FIRST
-        #
-        if session.get("awaiting_ticket_info"):
-            issue = user_message.strip()
-
-            ticket_meta = classify_ticket(issue)
-            title = ticket_meta["title"]
-            priority = ticket_meta["priority"]
-
+        if lower_msg == "debug create ticket":
             ticket_id = create_ticket_from_ai(
                 user_id,
-                title,
-                issue,
-                priority,
+                "Debug Ticket",
+                "This is a forced debug ticket.",
+                "medium",
             )
 
-            session.pop("awaiting_ticket_info", None)
+            print("DEBUG: forced ticket creation returned:", ticket_id)
 
             if not ticket_id:
-                return jsonify({
-                    "reply": "I couldn't create your ticket right now. Please try again."
-                }), 500
+                return jsonify({"reply": "Forced ticket creation failed."}), 500
 
-            reply_text = (
-                f"Support ticket created.\n\n"
-                f"Ticket Number: {ticket_id}\n"
-                f"Title: {title}\n"
-                f"Status: open\n"
-                f"Priority: {priority}\n\n"
-                f"You can track this ticket from your account."
-            )
+            return jsonify({"reply": f"Forced ticket created with ID {ticket_id}"})        
 
-            session["history"].append({"role": "user", "content": user_message})
-            session["history"].append({"role": "assistant", "content": reply_text})
-            session["history"] = session["history"][-20:]
-            session.modified = True
-
-            return jsonify({"reply": reply_text})
-
-        #
-        # STORE USER MESSAGE
-        #
-        session["history"].append({
-            "role": "user",
-            "content": user_message,
-        })
-        session["history"] = session["history"][-20:]
-        session.modified = True
+        if "history" not in session:
+            session["history"] = []
 
         #
         # RESET CHAT
@@ -164,11 +197,95 @@ def chat():
         if "reset chat" in lower_msg:
             session["history"] = []
             session.pop("awaiting_ticket_info", None)
+            session.pop("confirm_ticket_creation", None)
+            session.pop("last_issue_message", None)
             session.modified = True
             return jsonify({"reply": "Chat reset. How can I help you today?"})
 
         #
-        # CREATE TICKET INTENT
+        # STORE USER MESSAGE + LAST ISSUE
+        #
+        session["history"].append({
+            "role": "user",
+            "content": user_message,
+        })
+        session["history"] = session["history"][-20:]
+        session["last_issue_message"] = user_message
+        session.modified = True
+
+        #
+        # USER CONFIRMED TICKET CREATION AFTER ESCALATION
+        #
+        if session.get("confirm_ticket_creation") and user_confirmed_ticket(user_message):
+            print("DEBUG: confirm_ticket_creation branch hit")
+
+            issue = session.get("last_issue_message_before_confirmation") or session.get("last_issue_message") or user_message
+
+            ticket_id, title, priority = create_ticket_for_issue(user_id, issue)
+
+            session.pop("confirm_ticket_creation", None)
+            session.pop("last_issue_message_before_confirmation", None)
+            session.modified = True
+
+            if not ticket_id:
+                return jsonify({
+                    "reply": "I couldn't create your support ticket right now. Please try again."
+                }), 500
+
+            reply_text = build_ticket_created_reply(ticket_id, title, priority)
+
+            session["history"].append({"role": "assistant", "content": reply_text})
+            session["history"] = session["history"][-20:]
+            session.modified = True
+
+            return jsonify({"reply": reply_text})
+
+        #
+        # USER SAID NO TO TICKET CREATION
+        #
+        if session.get("confirm_ticket_creation") and lower_msg in {"no", "no thanks", "not now", "cancel"}:
+            print("DEBUG: user declined ticket creation")
+
+            session.pop("confirm_ticket_creation", None)
+            session.pop("last_issue_message_before_confirmation", None)
+            session.modified = True
+
+            reply_text = "Okay. Let me know if you'd like help troubleshooting more or if you want me to create a ticket later."
+
+            session["history"].append({"role": "assistant", "content": reply_text})
+            session["history"] = session["history"][-20:]
+            session.modified = True
+
+            return jsonify({"reply": reply_text})
+
+        #
+        # HANDLE EXPLICIT TICKET CREATION STEP
+        #
+        if session.get("awaiting_ticket_info"):
+            print("DEBUG: awaiting_ticket_info branch hit")
+
+            issue = user_message.strip()
+
+            ticket_id, title, priority = create_ticket_for_issue(user_id, issue)
+
+            session.pop("awaiting_ticket_info", None)
+            session.modified = True
+
+            if not ticket_id:
+                return jsonify({
+                    "reply": "I couldn't create your ticket right now. Please try again."
+                }), 500
+
+            reply_text = build_ticket_created_reply(ticket_id, title, priority)
+
+            session["history"].append({"role": "assistant", "content": reply_text})
+            session["history"] = session["history"][-20:]
+            session.modified = True
+
+            return jsonify({"reply": reply_text})
+
+        #
+        # EXPLICIT CREATE TICKET INTENT
         #
         create_ticket_trigger = any(
             phrase in lower_msg
@@ -178,10 +295,15 @@ def chat():
                 "submit ticket",
                 "make a ticket",
                 "report issue",
+                "file a ticket",
+                "file ticket",
             ]
         )
 
         if create_ticket_trigger:
+            print("DEBUG: explicit create ticket trigger hit")
+            print("DEBUG: setting awaiting_ticket_info = True")
+
             session["awaiting_ticket_info"] = True
             session.modified = True
 
@@ -210,6 +332,8 @@ def chat():
         )
 
         if latest_ticket_trigger:
+            print("DEBUG: latest ticket branch hit")
+
             ticket = get_latest_ticket(user_id)
 
             if not ticket:
@@ -243,6 +367,8 @@ def chat():
         )
 
         if wants_status and ticket_id is not None:
+            print("DEBUG: specific ticket lookup branch hit")
+
             ticket = get_ticket_by_user_id_and_id(user_id, ticket_id)
 
             if ticket:
@@ -271,17 +397,106 @@ def chat():
             session.modified = True
 
             return jsonify({"reply": reply_text})
+        
+        #
+        # DETECT USER REPORTING AN IT ISSUE
+        #
+        issue_keywords = [
+            "not working",
+            "won't work",
+            "cannot",
+            "can't",
+            "error",
+            "broken",
+            "issue",
+            "problem",
+            "doesn't work",
+            "wifi",
+            "printer",
+            "login",
+            "email",
+        ]
+
+        if any(keyword in lower_msg for keyword in issue_keywords):
+
+            # prevent it triggering if we already asked
+            if not session.get("confirm_ticket_creation"):
+
+                print("DEBUG: issue detected -> offering ticket creation")
+
+                session["confirm_ticket_creation"] = True
+                session["last_issue_message_before_confirmation"] = user_message
+                session.modified = True
+
+                reply_text = (
+                    "It sounds like you're experiencing a technical issue.\n\n"
+                    "Would you like me to create a support ticket for this problem?"
+                )
+
+                session["history"].append({"role": "assistant", "content": reply_text})
+                session["history"] = session["history"][-20:]
+                session.modified = True
+
+                return jsonify({"reply": reply_text})
+
+        #
+        # FAILED TROUBLESHOOTING / ESCALATION DETECTION
+        #
+        failure_phrases = [
+            "that didn't work",
+            "that did not work",
+            "still not working",
+            "it didn't work",
+            "it did not work",
+            "still broken",
+            "not fixed",
+            "problem still happening",
+            "issue still happening",
+            "no that didn't help",
+            "no that did not help",
+            "didn't fix it",
+            "did not fix it",
+        ]
+
+        if any(phrase in lower_msg for phrase in failure_phrases):
+            print("DEBUG: escalation prompt branch hit")
+            print("DEBUG: setting confirm_ticket_creation = True")
+
+            previous_issue = None
+            for msg in reversed(session["history"][:-1]):
+                if msg.get("role") == "user":
+                    previous_issue = msg.get("content")
+                    break
+
+            session["confirm_ticket_creation"] = True
+            session["last_issue_message_before_confirmation"] = previous_issue or session.get("last_issue_message") or user_message
+            session.modified = True
+
+            reply_text = (
+                "It looks like this issue may require assistance from the IT support team.\n\n"
+                "Would you like me to create a support ticket for you?"
+            )
+
+            session["history"].append({"role": "assistant", "content": reply_text})
+            session["history"] = session["history"][-20:]
+            session.modified = True
+
+            return jsonify({"reply": reply_text})
 
         #
         # AI TROUBLESHOOTING
         #
+        print("DEBUG: normal AI response branch hit")
+
         similar_tickets = get_similar_tickets(user_message)
         ticket_context = ""
 
         for t in similar_tickets:
+            issue_text = t.get("issue") or t.get("description") or ""
+            solution_text = t.get("solution") or ""
             ticket_context += (
-                f"Issue: {t['issue']}\n"
-                f"Related info: {t['solution']}\n\n"
+                f"Issue: {issue_text}\n"
+                f"Related info: {solution_text}\n\n"
             )
 
         history_for_model = session["history"][-10:]
@@ -291,7 +506,16 @@ def chat():
             messages=[
                 {
                     "role": "system",
-                    "content": CHATBOT_POLICY,
+                    "content": (
+                        CHATBOT_POLICY
+                        + "\n\n"
+                        + "Application rules:\n"
+                        + "- The user is already authenticated.\n"
+                        + "- Do not ask for the user's name, email, student number, or credentials.\n"
+                        + "- Do not say a ticket has been created, submitted, updated, or saved unless the backend has explicitly confirmed it.\n"
+                        + "- If troubleshooting fails, you may suggest creating a support ticket, but do not claim it already exists.\n"
+                        + "- Only provide IT help desk support.\n"
+                    ),
                 },
                 {
                     "role": "system",
@@ -307,6 +531,27 @@ def chat():
 
         reply = (response.choices[0].message.content or "").strip()
 
+        #
+        # BLOCK FAKE TICKET CREATION CLAIMS
+        #
+        fake_ticket_phrases = [
+            "i have created a support ticket",
+            "i created a support ticket",
+            "your ticket has been created",
+            "i submitted a ticket",
+            "ticket has been submitted",
+            "the it support team will contact you soon",
+            "please provide your name",
+            "please provide your email",
+            "what is your email",
+            "what is your name",
+        ]
+
+        if any(phrase in reply.lower() for phrase in fake_ticket_phrases):
+            reply = (
+                "I can help troubleshoot the issue, or if you'd like, I can help create a support ticket for you."
+            )
+
         if not reply:
             reply = "I'm sorry, I couldn't generate a response right now."
 
@@ -320,4 +565,5 @@ def chat():
         return jsonify({"reply": reply})
 
     except Exception as e:
+        print("DEBUG: /chat error =", str(e))
         return jsonify({"error": str(e)}), 500

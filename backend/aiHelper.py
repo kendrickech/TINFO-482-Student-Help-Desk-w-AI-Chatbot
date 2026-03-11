@@ -44,38 +44,33 @@ def get_similar_tickets(user_message):
             conn.close()
 
 
-def create_ticket_from_ai(user_id, title, description, priority="medium"):
+def create_ticket_from_ai(user_id, title, description, priority):
     conn = None
-
+    print("DEBUG: create_ticket_from_ai called with:", user_id, title, description, priority)
     try:
         conn = get_db_connection()
 
-        with conn.cursor(cursor_factory=RealDictCursor) as cursor:
-            cursor.execute(
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
                 """
-                INSERT INTO ticket_table
-                (title, description, status, priority, created_by)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO ticket_table (created_by, title, description, priority, status)
+                VALUES (%s, %s, %s, %s, 'open')
                 RETURNING ticket_id
                 """,
-                (
-                    title,
-                    description,
-                    "open",
-                    priority,
-                    user_id
-                )
+                (user_id, title, description, priority),
             )
+            row = cur.fetchone()
 
-            result = cursor.fetchone()
-            conn.commit()
+        conn.commit()
 
-            return result["ticket_id"] if result else None
+        ticket_id = row["ticket_id"] if row else None
+        print("DEBUG: create_ticket_from_ai success, ticket_id =", ticket_id)
+        return ticket_id
 
     except Exception as e:
-        print("Ticket create error:", e)
         if conn:
             conn.rollback()
+        print("DEBUG: create_ticket_from_ai failed:", e)
         return None
 
     finally:
@@ -94,6 +89,7 @@ def get_latest_ticket(user_id):
                 SELECT ticket_id, title, description, status, priority, created_at
                 FROM ticket_table
                 WHERE created_by = %s
+                  AND archived_at IS NULL
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
@@ -135,6 +131,7 @@ def get_ticket_by_user_id_and_id(user_id, ticket_id):
                 FROM ticket_table
                 WHERE ticket_id = %s
                   AND created_by = %s
+                  AND archived_at IS NULL
                 """,
                 (ticket_id, user_id)
             )

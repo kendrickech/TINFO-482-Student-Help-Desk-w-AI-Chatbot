@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_BASE = "http://localhost:5000";
 
@@ -11,31 +11,40 @@ How can I help you today?`,
   },
 ];
 
-export default function Chatbot() {
+export default function Chatbot({ user }) {
   const [message, setMessage] = useState("");
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
-  const [messages, setMessages] = useState(() => {
-    try {
-      const saved = localStorage.getItem("chatbotMessages");
-      return saved ? JSON.parse(saved) : STARTER_MESSAGES;
-    } catch {
-      return STARTER_MESSAGES;
-    }
-  });
+  const storageKey = useMemo(() => {
+    return user?.id ? `chatbotMessages_user_${user.id}` : "chatbotMessages_guest";
+  }, [user]);
 
+  const [messages, setMessages] = useState(STARTER_MESSAGES);
   const messagesEndRef = useRef(null);
+
+  //////////////////////////////////////////////////
+  // LOAD CHAT FOR CURRENT USER
+  //////////////////////////////////////////////////
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      setMessages(saved ? JSON.parse(saved) : STARTER_MESSAGES);
+    } catch {
+      setMessages(STARTER_MESSAGES);
+    }
+  }, [storageKey]);
 
   //////////////////////////////////////////////////
   // SAVE CHAT TO LOCAL STORAGE
   //////////////////////////////////////////////////
 
   useEffect(() => {
-    localStorage.setItem("chatbotMessages", JSON.stringify(messages));
-  }, [messages]);
+    localStorage.setItem(storageKey, JSON.stringify(messages));
+  }, [messages, storageKey]);
 
   //////////////////////////////////////////////////
   // AUTO SCROLL
@@ -45,17 +54,16 @@ export default function Chatbot() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isOpen, isMinimized]);
 
-  //////////////////////////////////////////////////
-  // SEND MESSAGE
-  //////////////////////////////////////////////////
+  const clearChat = () => {
+    setMessages(STARTER_MESSAGES);
+    localStorage.setItem(storageKey, JSON.stringify(STARTER_MESSAGES));
+  };
 
   const sendMessage = async () => {
     if (!message.trim() || isSending) return;
 
     const userMessage = message.trim();
-
     setMessages((prev) => [...prev, { sender: "user", text: userMessage }]);
-
     setMessage("");
     setIsSending(true);
 
@@ -74,10 +82,7 @@ export default function Chatbot() {
       if (response.status === 401) {
         setMessages((prev) => [
           ...prev,
-          {
-            sender: "bot",
-            text: "You must be logged in to use the chatbot.",
-          },
+          { sender: "bot", text: "You must be logged in to use the chatbot." },
         ]);
         return;
       }
@@ -88,21 +93,13 @@ export default function Chatbot() {
     } catch (error) {
       setMessages((prev) => [
         ...prev,
-        {
-          sender: "bot",
-          text: "Unable to reach the server right now.",
-        },
+        { sender: "bot", text: "Unable to reach the server right now." },
       ]);
-
       console.error("Chatbot request failed:", error);
     } finally {
       setIsSending(false);
     }
   };
-
-  //////////////////////////////////////////////////
-  // ENTER KEY SEND
-  //////////////////////////////////////////////////
 
   const handleEnter = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -110,10 +107,6 @@ export default function Chatbot() {
       sendMessage();
     }
   };
-
-  //////////////////////////////////////////////////
-  // VOICE INPUT
-  //////////////////////////////////////////////////
 
   const startListening = () => {
     if (isListening) return;
@@ -127,7 +120,6 @@ export default function Chatbot() {
     }
 
     const recognition = new SpeechRecognition();
-
     recognition.lang = "en-US";
     recognition.start();
 
@@ -139,35 +131,15 @@ export default function Chatbot() {
       setIsListening(false);
     };
 
-    recognition.onerror = () => {
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
+    recognition.onerror = () => setIsListening(false);
+    recognition.onend = () => setIsListening(false);
   };
-
-  //////////////////////////////////////////////////
-  // VOICE OUTPUT
-  //////////////////////////////////////////////////
 
   const speakText = (text) => {
     window.speechSynthesis.cancel();
-
     const speech = new SpeechSynthesisUtterance(text);
     speech.lang = "en-US";
-
     window.speechSynthesis.speak(speech);
-  };
-
-  //////////////////////////////////////////////////
-  // CLEAR CHAT
-  //////////////////////////////////////////////////
-
-  const clearChat = () => {
-    setMessages(STARTER_MESSAGES);
-    localStorage.setItem("chatbotMessages", JSON.stringify(STARTER_MESSAGES));
   };
 
   //////////////////////////////////////////////////
