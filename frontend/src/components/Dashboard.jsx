@@ -42,7 +42,8 @@ function TicketList({ title, tickets, emptyMessage }) {
                         >
                             <div style={{ fontWeight: "bold", color: "var(--uw-purple)" }}>{t.title}</div>
                             <div style={{ fontSize: 14, color: "var(--uw-muted)", marginTop: 4 }}>
-                                Status: {t.status} | Priority: {t.priority}
+                                Status: {t.statusDisplay || t.status?.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || "Unknown"}{" "}
+                                | Priority: {t.priorityDisplay || t.priority?.charAt(0).toUpperCase() + t.priority?.slice(1) || "Low"}
                             </div>
                         </Link>
                     ))}

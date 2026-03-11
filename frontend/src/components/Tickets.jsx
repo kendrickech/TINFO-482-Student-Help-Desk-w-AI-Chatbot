@@ -39,6 +39,8 @@ function Tickets({
     const [searchValue, setSearchValue] = useState("");
     const [searchResults, setSearchResults] = useState([]);
     const [searchMessage, setSearchMessage] = useState("");
+    
+    const canSearchTickets = user?.role === "admin" || user?.role === "technician"
 
     const visibleTickets = useMemo(() => {
         if (!user) return [];
@@ -192,49 +194,54 @@ function Tickets({
             </div>
         );
     };
-    const handleAdminSearch = async () => {
-    if (!searchValue.trim()) {
-        setSearchMessage("Enter email or student number");
-        return;
-    }
 
-    try {
-        const data = await apiFetch(
-            `/tickets/search-tickets?query=${encodeURIComponent(searchValue)}`
-        );
-
-        if (!Array.isArray(data)) {
-            setSearchResults([]);
-            setSearchMessage("Unexpected server response");
+    const handleSearch = async () => {
+        if (!searchValue.trim()) {
+            setSearchMessage("Enter email or student number");
             return;
         }
 
-        if (data.length === 0) {
-            setSearchMessage("No tickets found");
-            setSearchResults([]);
-        } else {
-            setSearchResults(data);
-            setSearchMessage("");
-        }
+        try {
+            const data = await apiFetch(
+                `/tickets/search-tickets?query=${encodeURIComponent(searchValue)}`
+            );
 
-    } catch (err) {
-        console.error(err);
-        setSearchMessage("Search failed");
-        setSearchResults([]);
-    }
-};
+            if (!Array.isArray(data)) {
+                setSearchResults([]);
+                setSearchMessage("Unexpected server response");
+                return;
+            }
+
+            if (data.length === 0) {
+                setSearchMessage("No tickets found");
+                setSearchResults([]);
+            } else {
+                setSearchResults(data);
+                setSearchMessage("");
+            }
+
+        } catch (err) {
+            console.error(err);
+            setSearchMessage("Search failed");
+            setSearchResults([]);
+        }
+    };
 
 
     return (
         <>
-            {user?.role === "admin" && (
+            {canSearchTickets && (
                 <div className="card" style={{ marginBottom: 16 }}>
-                    <h3 style={{ marginTop: 0 }}>Search User Tickets</h3>
-
-                    <div style={{ display: "flex", gap: 10 }}>
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault(); // prevents page refresh
+                            handleSearch();
+                        }}
+                        style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
+                    >
                         <input
                             type="text"
-                            placeholder="Enter student # or email"
+                            placeholder="Enter student username or email"
                             value={searchValue}
                             onChange={(e) => setSearchValue(e.target.value)}
                             className="select"
@@ -242,35 +249,80 @@ function Tickets({
                         />
 
                         <button
-                            onClick={handleAdminSearch}
+                            type="submit"
                             className="primary-btn"
                         >
                             Search
                         </button>
-                    </div>
-
-                    {searchMessage && (
-                        <p style={{ marginTop: 8 }}>{searchMessage}</p>
-                    )}
+                    </form>
                 </div>
             )}
             {searchResults.length > 0 && (
                 <div style={{ marginBottom: 20 }}>
-                    <h3>Search Results</h3>
+                    <h3 className="page-title" style={{ fontSize: 22, marginBottom: 14 }}>
+                        Search Results
+                    </h3>
 
-                    {searchResults.map((ticket) => (
-                        <Link
-                            key={ticket.id}
-                            to={`/tickets/${ticket.id}`}
-                            style={{ textDecoration: "none", color: "inherit" }}
-                        >
-                            <div className="card" style={{ marginBottom: 10 }}>
-                                <p><strong>Title:</strong> {ticket.title}</p>
-                                <p><strong>Email:</strong> {ticket.email}</p>
-                                <p><strong>Status:</strong> {ticket.status}</p>
-                            </div>
-                        </Link>
-                    ))}
+                    <div style={{ display: "grid", gap: 12 }}>
+                        {searchResults.map((ticket) => (
+                            <Link
+                                key={ticket.id}
+                                to={`/tickets/${ticket.id}`}
+                                style={{ textDecoration: "none", color: "inherit" }}
+                            >
+                                <div
+                                    className="card"
+                                    style={{
+                                        cursor: "pointer",
+                                        transition: "0.2s ease",
+                                        background: "#faf9f7",
+                                    }}
+                                >
+                                    {/* Title */}
+                                    <div
+                                        style={{
+                                            fontSize: 20,
+                                            fontWeight: "bold",
+                                            color: "var(--uw-purple)",
+                                            marginBottom: 6,
+                                        }}
+                                    >
+                                        {ticket.title}
+                                    </div>
+
+                                    {/* Status + Priority */}
+                                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                                        <span className="badge">
+                                            Status: {ticket.statusDisplay || ticket.status}
+                                        </span>
+
+                                        {ticket.priority && (
+                                            <span className="badge">
+                                                Priority: {ticket.priorityDisplay || ticket.priority}
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    {/* Description */}
+                                    {ticket.description && (
+                                        <p style={{ marginTop: 0, marginBottom: 12 }}>
+                                            {ticket.description}
+                                        </p>
+                                    )}
+
+                                    {/* Meta info */}
+                                    <p className="ticket-meta" style={{ margin: 0 }}>
+                                        Email: {ticket.email} {" • "}
+                                        Student #: {ticket.user_id ?? "Unknown"} {" • "}
+                                        Created:{" "}
+                                        {ticket.created_at
+                                            ? new Date(ticket.created_at).toLocaleString()
+                                            : "Unknown"}
+                                    </p>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
                 </div>
             )}
             <div>

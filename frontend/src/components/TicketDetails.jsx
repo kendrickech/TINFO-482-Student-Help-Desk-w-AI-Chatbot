@@ -102,13 +102,18 @@ function TicketDetails({ user, onTicketsChanged }) {
 
     const updateStatus = async () => {
         try {
+            if (!statusDraft) {
+                setError("Please select a status");
+                return;
+            }
+
             setError("");
             setStatusMsg("");
             setSavingStatus(true);
 
             await apiFetch(`/tickets/${ticketId}/status`, {
                 method: "PATCH",
-                body: JSON.stringify({ status: statusDraft }),
+                body: JSON.stringify({ status: statusDraft.toLowerCase() }),
             });
 
             await loadTicket();
@@ -125,13 +130,18 @@ function TicketDetails({ user, onTicketsChanged }) {
 
     const updatePriority = async () => {
         try {
+            if (!priorityDraft) {
+                setError("Please select a priority");
+                return;
+            }
+
             setError("");
             setPriorityMsg("");
             setSavingPriority(true);
 
             await apiFetch(`/tickets/${ticketId}/priority`, {
                 method: "PATCH",
-                body: JSON.stringify({ priority: priorityDraft }),
+                body: JSON.stringify({ priority: priorityDraft.toLowerCase() }),
             });
 
             await loadTicket();
