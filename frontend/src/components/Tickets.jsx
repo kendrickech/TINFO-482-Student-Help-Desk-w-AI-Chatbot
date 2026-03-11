@@ -1,6 +1,20 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+const API_BASE = "http://localhost:5000";
+
+async function apiFetch(path, options = {}) {
+    const res = await fetch(`${API_BASE}${path}`, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        ...options,
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Request failed");
+    return data;
+}
+
 function Tickets({
     user,
     tickets,
@@ -21,6 +35,12 @@ function Tickets({
 
     const [showArchived, setShowArchived] = useState(false);
     const [loadingArchivedToggle, setLoadingArchivedToggle] = useState(false);
+
+    const [searchValue, setSearchValue] = useState("");
+    const [searchResults, setSearchResults] = useState([]);
+    const [searchMessage, setSearchMessage] = useState("");
+    
+    const canSearchTickets = user?.role === "admin" || user?.role === "technician"
 
     const visibleTickets = useMemo(() => {
         if (!user) return [];
@@ -175,134 +195,264 @@ function Tickets({
         );
     };
 
+    const handleSearch = async () => {
+        if (!searchValue.trim()) {
+            setSearchMessage("Enter email or student number");
+            return;
+        }
+
+        try {
+            const data = await apiFetch(
+                `/tickets/search-tickets?query=${encodeURIComponent(searchValue)}`
+            );
+
+            if (!Array.isArray(data)) {
+                setSearchResults([]);
+                setSearchMessage("Unexpected server response");
+                return;
+            }
+
+            if (data.length === 0) {
+                setSearchMessage("No tickets found");
+                setSearchResults([]);
+            } else {
+                setSearchResults(data);
+                setSearchMessage("");
+            }
+
+        } catch (err) {
+            console.error(err);
+            setSearchMessage("Search failed");
+            setSearchResults([]);
+        }
+    };
+
+
     return (
-        <div>
-            <div
-                style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 12,
-                    flexWrap: "wrap",
-                    marginBottom: 18,
-                }}
-            >
-                <h1 className="page-title" style={{ margin: 0 }}>Tickets</h1>
-
-                {canManage && (
-                    <button
-                        onClick={handleToggleArchived}
-                        disabled={loadingArchivedToggle}
-                        className="secondary-btn"
+        <>
+            {canSearchTickets && (
+                <div className="card" style={{ marginBottom: 16 }}>
+                    <form
+                        onSubmit={(e) => {
+                            e.preventDefault(); // prevents page refresh
+                            handleSearch();
+                        }}
+                        style={{ display: "flex", gap: 10, flexWrap: "wrap" }}
                     >
-                        {loadingArchivedToggle
-                            ? "Loading..."
-                            : showArchived
-                                ? "Show Active Tickets"
-                                : "Show Archived Tickets"}
-                    </button>
-                )}
-            </div>
+                        <input
+                            type="text"
+                            placeholder="Enter student username or email"
+                            value={searchValue}
+                            onChange={(e) => setSearchValue(e.target.value)}
+                            className="select"
+                            style={{ minWidth: 260 }}
+                        />
 
-            {!canManage && !showArchived && (
-                <div className="card" style={{ maxWidth: 650, marginBottom: 24 }}>
-                    <h3 className="page-title" style={{ marginTop: 0, fontSize: 22 }}>
-                        Submit a Ticket
-                    </h3>
-
-                    <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
-                        <div className="label">
-                            <label>Title</label>
-                            <input
-                                className="input"
-                                value={title}
-                                onChange={(e) => setTitle(e.target.value)}
-                                placeholder="e.g., Wi-Fi not working"
-                                disabled={submitting}
-                            />
-                        </div>
-
-                        <div className="label">
-                            <label>Description</label>
-                            <textarea
-                                className="textarea"
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                                placeholder="Describe the issue and any steps you already tried..."
-                                rows={4}
-                                disabled={submitting}
-                            />
-                        </div>
-
-                        <div className="label">
-                            <label>Priority</label>
-                            <select
-                                className="select"
-                                value={priority}
-                                onChange={(e) => setPriority(e.target.value)}
-                                disabled={submitting}
-                            >
-                                <option value="low">Low</option>
-                                <option value="medium">Medium</option>
-                                <option value="high">High</option>
-                            </select>
-                        </div>
-
-                        <button type="submit" className="primary-btn" disabled={submitting}>
-                            {submitting ? "Submitting..." : "Submit Ticket"}
+                        <button
+                            type="submit"
+                            className="primary-btn"
+                        >
+                            Search
                         </button>
-
-                        {message && (
-                            <p style={{ marginBottom: 0, color: message.includes("Failed") ? "crimson" : "var(--uw-muted)" }}>
-                                {message}
-                            </p>
-                        )}
                     </form>
                 </div>
             )}
-
-            {showArchived ? (
-                <>
-                    <h3 className="page-title" style={{ fontSize: 22 }}>
-                        {canManage ? "Archived Tickets" : "My Tickets"}
+            {searchResults.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                    <h3 className="page-title" style={{ fontSize: 22, marginBottom: 14 }}>
+                        Search Results
                     </h3>
 
-                    {visibleTickets.length === 0 ? (
-                        <p style={{ color: "var(--uw-muted)" }}>No tickets yet.</p>
-                    ) : (
-                        <div className="ticket-grid" style={{ maxWidth: 900 }}>
-                            {visibleTickets.slice().reverse().map(TicketCard)}
-                        </div>
-                    )}
-                </>
-            ) : (
-                <>
-                    <h3 className="page-title" style={{ fontSize: 22 }}>
-                        {canManage ? "Active Tickets" : "My Active Tickets"}
-                    </h3>
+                    <div style={{ display: "grid", gap: 12 }}>
+                        {searchResults.map((ticket) => (
+                            <Link
+                                key={ticket.id}
+                                to={`/tickets/${ticket.id}`}
+                                style={{ textDecoration: "none", color: "inherit" }}
+                            >
+                                <div
+                                    className="card"
+                                    style={{
+                                        cursor: "pointer",
+                                        transition: "0.2s ease",
+                                        background: "#faf9f7",
+                                    }}
+                                >
+                                    {/* Title */}
+                                    <div
+                                        style={{
+                                            fontSize: 20,
+                                            fontWeight: "bold",
+                                            color: "var(--uw-purple)",
+                                            marginBottom: 6,
+                                        }}
+                                    >
+                                        {ticket.title}
+                                    </div>
 
-                    {activeTickets.length === 0 ? (
-                        <p style={{ color: "var(--uw-muted)" }}>No active tickets.</p>
-                    ) : (
-                        <div className="ticket-grid" style={{ maxWidth: 900 }}>
-                            {activeTickets.slice().reverse().map(TicketCard)}
-                        </div>
-                    )}
+                                    {/* Status + Priority */}
+                                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                                        <span className="badge">
+                                            Status: {ticket.statusDisplay || ticket.status}
+                                        </span>
 
-                    <h3 className="page-title" style={{ fontSize: 22, marginTop: 24 }}>
-                        {canManage ? "Resolved Tickets" : "My Resolved Tickets"}
-                    </h3>
+                                        {ticket.priority && (
+                                            <span className="badge">
+                                                Priority: {ticket.priorityDisplay || ticket.priority}
+                                            </span>
+                                        )}
+                                    </div>
 
-                    {resolvedTickets.length === 0 ? (
-                        <p style={{ color: "var(--uw-muted)" }}>No resolved tickets.</p>
-                    ) : (
-                        <div className="ticket-grid" style={{ maxWidth: 900 }}>
-                            {resolvedTickets.slice().reverse().map(TicketCard)}
-                        </div>
-                    )}
-                </>
+                                    {/* Description */}
+                                    {ticket.description && (
+                                        <p style={{ marginTop: 0, marginBottom: 12 }}>
+                                            {ticket.description}
+                                        </p>
+                                    )}
+
+                                    {/* Meta info */}
+                                    <p className="ticket-meta" style={{ margin: 0 }}>
+                                        Email: {ticket.email} {" • "}
+                                        Student #: {ticket.user_id ?? "Unknown"} {" • "}
+                                        Created:{" "}
+                                        {ticket.created_at
+                                            ? new Date(ticket.created_at).toLocaleString()
+                                            : "Unknown"}
+                                    </p>
+                                </div>
+                            </Link>
+                        ))}
+                    </div>
+                </div>
             )}
-        </div>
+            <div>
+                <div
+                    style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                        marginBottom: 18,
+                    }}
+                >
+                    <h1 className="page-title" style={{ margin: 0 }}>Tickets</h1>
+
+                    {canManage && (
+                        <button
+                            onClick={handleToggleArchived}
+                            disabled={loadingArchivedToggle}
+                            className="secondary-btn"
+                        >
+                            {loadingArchivedToggle
+                                ? "Loading..."
+                                : showArchived
+                                    ? "Show Active Tickets"
+                                    : "Show Archived Tickets"}
+                        </button>
+                    )}
+                </div>
+
+                {!canManage && !showArchived && (
+                    <div className="card" style={{ maxWidth: 650, marginBottom: 24 }}>
+                        <h3 className="page-title" style={{ marginTop: 0, fontSize: 22 }}>
+                            Submit a Ticket
+                        </h3>
+
+                        <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12 }}>
+                            <div className="label">
+                                <label>Title</label>
+                                <input
+                                    className="input"
+                                    value={title}
+                                    onChange={(e) => setTitle(e.target.value)}
+                                    placeholder="e.g., Wi-Fi not working"
+                                    disabled={submitting}
+                                />
+                            </div>
+
+                            <div className="label">
+                                <label>Description</label>
+                                <textarea
+                                    className="textarea"
+                                    value={description}
+                                    onChange={(e) => setDescription(e.target.value)}
+                                    placeholder="Describe the issue and any steps you already tried..."
+                                    rows={4}
+                                    disabled={submitting}
+                                />
+                            </div>
+
+                            <div className="label">
+                                <label>Priority</label>
+                                <select
+                                    className="select"
+                                    value={priority}
+                                    onChange={(e) => setPriority(e.target.value)}
+                                    disabled={submitting}
+                                >
+                                    <option value="low">Low</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="high">High</option>
+                                </select>
+                            </div>
+
+                            <button type="submit" className="primary-btn" disabled={submitting}>
+                                {submitting ? "Submitting..." : "Submit Ticket"}
+                            </button>
+
+                            {message && (
+                                <p style={{ marginBottom: 0, color: message.includes("Failed") ? "crimson" : "var(--uw-muted)" }}>
+                                    {message}
+                                </p>
+                            )}
+                        </form>
+                    </div>
+                )}
+
+                {showArchived ? (
+                    <>
+                        <h3 className="page-title" style={{ fontSize: 22 }}>
+                            {canManage ? "Archived Tickets" : "My Tickets"}
+                        </h3>
+
+                        {visibleTickets.length === 0 ? (
+                            <p style={{ color: "var(--uw-muted)" }}>No tickets yet.</p>
+                        ) : (
+                            <div className="ticket-grid" style={{ maxWidth: 900 }}>
+                                {visibleTickets.slice().reverse().map(TicketCard)}
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <>
+                        <h3 className="page-title" style={{ fontSize: 22 }}>
+                            {canManage ? "Active Tickets" : "My Active Tickets"}
+                        </h3>
+
+                        {activeTickets.length === 0 ? (
+                            <p style={{ color: "var(--uw-muted)" }}>No active tickets.</p>
+                        ) : (
+                            <div className="ticket-grid" style={{ maxWidth: 900 }}>
+                                {activeTickets.slice().reverse().map(TicketCard)}
+                            </div>
+                        )}
+
+                        <h3 className="page-title" style={{ fontSize: 22, marginTop: 24 }}>
+                            {canManage ? "Resolved Tickets" : "My Resolved Tickets"}
+                        </h3>
+
+                        {resolvedTickets.length === 0 ? (
+                            <p style={{ color: "var(--uw-muted)" }}>No resolved tickets.</p>
+                        ) : (
+                            <div className="ticket-grid" style={{ maxWidth: 900 }}>
+                                {resolvedTickets.slice().reverse().map(TicketCard)}
+                            </div>
+                        )}
+                    </>
+                )}
+            </div>
+        </>
     );
 }
 

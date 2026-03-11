@@ -169,18 +169,59 @@ export default function App() {
     }, []);
 
     const updateTicket = async (ticketId, updates) => {
-        const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+        let endpoint = `${API_BASE}/tickets/${ticketId}`;
+        let body = {};
+
+        if ("assignedTo" in updates) {
+            endpoint = `${API_BASE}/tickets/${ticketId}/assign`;
+            body = { assignedTo: updates.assignedTo };
+        } else if ("priority" in updates) {
+            endpoint = `${API_BASE}/tickets/${ticketId}/priority`;
+            body = { priority: updates.priority };
+        } else if ("status" in updates) {
+            endpoint = `${API_BASE}/tickets/${ticketId}/status`;
+            body = { status: updates.status };
+        } else {
+            throw new Error("No valid ticket update field provided");
+        }
+
+        const res = await fetch(endpoint, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify(updates),
+            body: JSON.stringify(body),
         });
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Failed to update ticket");
 
-        setTickets((prev) => prev.map((t) => (t.id === ticketId ? data.ticket : t)));
-        return data.ticket;
+        // assignment route only returns { message: "Assignment updated" }
+        // so reload tickets after assignment changes
+        if ("assignedTo" in updates) {
+            const ticketsRes = await fetch(`${API_BASE}/tickets`, {
+                credentials: "include",
+            });
+
+            const ticketsData = await ticketsRes.json().catch(() => ({}));
+            if (!ticketsRes.ok) throw new Error(ticketsData.error || "Failed to refresh tickets");
+
+            setTickets(ticketsData.tickets || []);
+            return data;
+        }
+
+        // priority/status routes return a partial ticket, so merge it
+        if (data.ticket) {
+            setTickets((prev) =>
+                prev.map((t) =>
+                    t.id === ticketId
+                        ? { ...t, ...data.ticket }
+                        : t
+                )
+            );
+            return data.ticket;
+        }
+
+        return data;
     };
 
     const createTicket = async ({ title, description, priority }) => {
