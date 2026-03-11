@@ -25,6 +25,16 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def technician_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        role = session.get("user_role")
+        if role not in ("admin", "technician"):
+            return jsonify({"error": "Forbidden"}), 403
+        return f(*args, **kwargs)
+    return wrapper
+
+
 def col(row, name, index):
     """Read column from either RealDictCursor (dict) or default cursor (tuple)."""
     if row is None:
